@@ -1,0 +1,617 @@
+import { Server, type Connection, type ConnectionContext } from "partykit/server";
+import { AsyncLocalStorage } from "node:async_hooks";
+import type {
+  ContainerOptions,
+  ContainerState,
+  WebSocketProxyOptions
+} from "../types";
+
+const STATE_ROW_ID = "container_state_row_id";
+const STATE_CHANGED_ID = "container_state_changed_id";
+const DEFAULT_STATE = {} as ContainerState;
+
+// Context for storing container and connection information
+const containerContext = new AsyncLocalStorage<{
+  container: Container;
+  connection: Connection | undefined;
+  request: Request | undefined;
+}>();
+
+/**
+ * Helper function to get the current container context
+ */
+export function getCurrentContainer<T extends Container = Container>(): {
+  container: T | undefined;
+  connection: Connection | undefined;
+  request: Request | undefined;
+} {
+  const store = containerContext.getStore() as
+    | {
+        container: T;
+        connection: Connection | undefined;
+        request: Request | undefined;
+      }
+    | undefined;
+
+  if (!store) {
+    return {
+      container: undefined,
+      connection: undefined,
+      request: undefined,
+    };
+  }
+  return store;
+}
+
+/**
+ * Main Container class that wraps PartyKit's Server with container functionality
+ */
+export class Container<Env = unknown> extends Server<Env> {
+  // Default port for the container
+  defaultPort = 8080;
+
+  // Timeout after which the container will sleep if no activity
+  sleepAfter: string | number = "5m";
+  
+  // Whether to require explicit container start (if false, it starts automatically)
+  explicitContainerStart = false;
+  
+  // Default container configuration
+  containerConfig: {
+    env?: Record<string, string>;
+    entrypoint?: string[];
+    enableInternet?: boolean;
+  } = {
+    env: {},
+    enableInternet: true
+  };
+
+  // Internal state
+  #state = DEFAULT_STATE;
+
+  // Track WebSocket connections
+  #webSocketConnections = new Map<string, WebSocket>();
+
+  /**
+   * Initial state for the Container
+   */
+  initialState: ContainerState = DEFAULT_STATE;
+
+  /**
+   * Current state of the Container
+   */
+  get state(): ContainerState {
+    if (this.#state !== DEFAULT_STATE) {
+      // State was previously set
+      return this.#state;
+    }
+
+    // Check if state was set in previous session
+    const wasChanged = this.sql<{ state: "true" | undefined }>`
+      SELECT state FROM container_state WHERE id = ${STATE_CHANGED_ID}
+    `;
+
+    // Get the actual state from the database
+    const result = this.sql<{ state: ContainerState | undefined }>`
+      SELECT state FROM container_state WHERE id = ${STATE_ROW_ID}
+    `;
+
+    if (
+      wasChanged[0]?.state === "true" ||
+      result[0]?.state
+    ) {
+      const state = result[0]?.state as string;
+      this.#state = JSON.parse(state);
+      return this.#state;
+    }
+
+    // First time access, set initial state if provided
+    if (this.initialState === DEFAULT_STATE) {
+      return {} as ContainerState;
+    }
+
+    this.setState(this.initialState);
+    return this.initialState;
+  }
+
+  /**
+   * Container configuration options
+   */
+  static options = {
+    hibernate: true, // default to hibernate when idle
+  };
+
+  /**
+   * Execute SQL queries against the Container's database
+   */
+  sql<T = Record<string, string | number | boolean | null>>(
+    strings: TemplateStringsArray,
+    ...values: (string | number | boolean | null)[]
+  ) {
+    let query = "";
+    try {
+      // Construct the SQL query with placeholders
+      query = strings.reduce(
+        (acc, str, i) => acc + str + (i < values.length ? "?" : ""),
+        ""
+      );
+
+      // Execute the SQL query with the provided values
+      return [...this.ctx.storage.sql.exec(query, ...values)] as T[];
+    } catch (e) {
+      console.error(`Failed to execute SQL query: ${query}`, e);
+      throw this.onError(e);
+    }
+  }
+
+  constructor(ctx: any, env: Env, options?: ContainerOptions) {
+    super(ctx, env);
+    
+    // Apply options if provided
+    if (options) {
+      if (options.defaultPort !== undefined) this.defaultPort = options.defaultPort;
+      if (options.sleepAfter !== undefined) this.sleepAfter = options.sleepAfter;
+      if (options.explicitContainerStart !== undefined) this.explicitContainerStart = options.explicitContainerStart;
+      
+      // Apply container configuration if provided
+      if (options.env) this.containerConfig.env = options.env;
+      if (options.entrypoint) this.containerConfig.entrypoint = options.entrypoint;
+      if (options.enableInternet !== undefined) this.containerConfig.enableInternet = options.enableInternet;
+    }
+
+    // Create state table if it doesn't exist
+    this.sql`
+      CREATE TABLE IF NOT EXISTS container_state (
+        id TEXT PRIMARY KEY NOT NULL,
+        state TEXT
+      )
+    `;
+
+    // Set up message handling
+    const _onMessage = this.onMessage.bind(this);
+    this.onMessage = async (connection: Connection, message: any) => {
+      return containerContext.run(
+        { container: this, connection, request: undefined },
+        async () => {
+          if (typeof message !== "string") {
+            return this.#tryCatch(() => _onMessage(connection, message));
+          }
+
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(message);
+          } catch (e) {
+            // Silently fail and let the onMessage handler handle it
+            return this.#tryCatch(() => _onMessage(connection, message));
+          }
+
+          // Handle state updates if needed
+          // Allow original handler to process the message
+          return this.#tryCatch(() => _onMessage(connection, message));
+        }
+      );
+    };
+
+    // Set up connection handling
+    const _onConnect = this.onConnect.bind(this);
+    this.onConnect = (connection: Connection, ctx: ConnectionContext) => {
+      return containerContext.run(
+        { container: this, connection, request: ctx.request },
+        async () => {
+          // Send current state to the client
+          setTimeout(() => {
+            if (this.state) {
+              connection.send(
+                JSON.stringify({
+                  type: "container_state",
+                  state: this.state,
+                })
+              );
+            }
+            return this.#tryCatch(() => _onConnect(connection, ctx));
+          }, 20);
+        }
+      );
+    };
+
+    // Set up disconnect handling
+    const _onClose = this.onClose?.bind(this);
+    this.onClose = (connection: Connection) => {
+      return containerContext.run(
+        { container: this, connection, request: undefined },
+        async () => {
+          // Clean up any WebSocket connections for this connection
+          for (const [key, _] of this.#webSocketConnections.entries()) {
+            if (key.startsWith(connection.id)) {
+              this.#webSocketConnections.delete(key);
+            }
+          }
+
+          if (_onClose) {
+            return this.#tryCatch(() => _onClose(connection));
+          }
+        }
+      );
+    };
+
+    // Start the container automatically if needed
+    this.ctx.blockConcurrencyWhile(async () => {
+      if (this.shouldAutoStart()) {
+        await this.startAndWaitForPort(this.defaultPort);
+      }
+    });
+  }
+
+  /**
+   * Determine if container should auto-start
+   */
+  shouldAutoStart(): boolean {
+    return !this.explicitContainerStart; // Auto-start unless explicitly disabled
+  }
+
+  /**
+   * Start the container and wait for a port to be available
+   * Based on containers-starter-go implementation
+   */
+  async startAndWaitForPort(port: number = this.defaultPort, maxTries: number = 10): Promise<void> {
+    if (!this.ctx.container) {
+      throw new Error("No container found in context");
+    }
+
+    // Start the container if it's not running
+    if (!this.ctx.container.running) {
+      this.ctx.container.start({
+        env: this.containerConfig.env,
+        entrypoint: this.containerConfig.entrypoint,
+        enableInternet: this.containerConfig.enableInternet,
+      });
+    }
+
+    // Set up monitoring to track container status
+    try {
+      // Track container status
+      this.ctx.container.monitor().then(() => {
+        this.onShutdown(this.state);
+      }).catch((error: unknown) => {
+        this.onError(error);
+      });
+    } catch (e) {
+      console.warn("Error setting up container monitor:", e);
+    }
+
+    const tcpPort = this.ctx.container.getTcpPort(port);
+
+    // Try to connect to the port multiple times
+    for (let i = 0; i < maxTries; i++) {
+      try {
+        const response = await tcpPort.fetch("http://container/");
+        // 599 is a special status code used when the container isn't ready yet
+        if (response.status !== 599) {
+          // Successfully connected, container is ready
+          this.onBoot(this.state);
+          return;
+        }
+      } catch (e) {
+        // Ignore errors and try again
+      }
+
+      // Wait a bit before trying again
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+
+    throw new Error(`Failed to verify container is running after ${maxTries} attempts`);
+  }
+
+  /**
+   * Proxy an HTTP request to the container
+   * Based on containers-starter-go implementation
+   */
+  async proxyRequest(request: Request, port: number = this.defaultPort): Promise<Response> {
+    if (!this.ctx.container) {
+      throw new Error("No container found in context");
+    }
+
+    if (!this.ctx.container.running) {
+      try {
+        await this.startAndWaitForPort(port);
+      } catch (e) {
+        return new Response(`Failed to start container: ${e instanceof Error ? e.message : String(e)}`, { status: 500 });
+      }
+    }
+
+    const tcpPort = this.ctx.container.getTcpPort(port);
+
+    // Create URL for the container request
+    const url = new URL(request.url);
+    // Ensure we handle URLs properly whether they have search params or not
+    const containerUrl = `http://container${url.pathname}${url.search || ''}`;
+
+    // Clone the request to forward to the container
+    const requestInit: RequestInit = {
+      method: request.method,
+      headers: request.headers,
+    };
+
+    // Add body for non-GET/HEAD requests
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      requestInit.body = await request.clone().arrayBuffer();
+    }
+
+    try {
+      return await tcpPort.fetch(containerUrl, requestInit);
+    } catch (e) {
+      console.error("Error proxying request to container:", e);
+      return new Response(`Error proxying request to container: ${e instanceof Error ? e.message : String(e)}`, { status: 500 });
+    }
+  }
+
+  /**
+   * Proxy a WebSocket connection to the container
+   */
+  async proxyWebSocket(request: Request, connection: Connection, options: WebSocketProxyOptions = {}): Promise<void> {
+    if (!this.ctx.container) {
+      throw new Error("No container found in context");
+    }
+
+    const port = options.port || this.defaultPort;
+
+    if (!this.ctx.container.running) {
+      try {
+        await this.startAndWaitForPort(port);
+      } catch (e) {
+        connection.close(1011, `Failed to start container: ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
+    }
+
+    // Maximum number of connection attempts
+    const maxRetries = options.maxRetries || 5;
+
+    // Try to establish WebSocket connection to the container
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const tcpPort = this.ctx.container.getTcpPort(port);
+
+        // Create URL for the container WebSocket
+        const url = new URL(request.url);
+        // Ensure we handle URLs properly whether they have search params or not
+        const containerWebSocketUrl = `http://container${url.pathname}${url.search || ''}`;
+
+        // Forward the WebSocket handshake request with appropriate headers
+        const containerRequest = new Request(containerWebSocketUrl, {
+          method: request.method,
+          headers: request.headers,
+        });
+
+        // Get the WebSocket from the container
+        const containerWebsocket = await tcpPort.fetch(containerRequest).webSocket();
+
+        if (!containerWebsocket) {
+          throw new Error("Failed to establish WebSocket connection with container");
+        }
+
+        // Create a unique ID for this connection pair
+        const connectionKey = `${connection.id}-${Date.now()}`;
+
+        // Store the container WebSocket
+        this.#webSocketConnections.set(connectionKey, containerWebsocket);
+
+        // Set up bidirectional message forwarding
+
+        // Forward messages from client to container
+        connection.addEventListener("message", (event) => {
+          try {
+            if (containerWebsocket.readyState === WebSocket.OPEN) {
+              const message = typeof event.data === "string"
+                ? event.data
+                : new Uint8Array(event.data as ArrayBuffer);
+
+              containerWebsocket.send(message);
+            }
+          } catch (e) {
+            console.error("Error forwarding message to container:", e);
+          }
+        });
+
+        // Forward messages from container to client
+        containerWebsocket.addEventListener("message", (event) => {
+          try {
+            if (connection.readyState === WebSocket.OPEN) {
+              connection.send(event.data);
+            }
+          } catch (e) {
+            console.error("Error forwarding message to client:", e);
+          }
+        });
+
+        // Handle WebSocket closure
+        containerWebsocket.addEventListener("close", (event) => {
+          this.#webSocketConnections.delete(connectionKey);
+          if (connection.readyState === WebSocket.OPEN) {
+            connection.close(event.code, event.reason);
+          }
+        });
+
+        connection.addEventListener("close", () => {
+          this.#webSocketConnections.delete(connectionKey);
+          if (containerWebsocket.readyState === WebSocket.OPEN) {
+            containerWebsocket.close();
+          }
+        });
+
+        // Log successful WebSocket connection if debug enabled
+        if (options.debug) {
+          console.log(`WebSocket connection established to container port ${port}`);
+        }
+
+        // Successfully established connection
+        if (options.onOpen) {
+          options.onOpen();
+        }
+
+        return;
+      } catch (e) {
+        console.error(`WebSocket connection attempt ${attempt + 1} failed:`, e);
+
+        if (attempt < maxRetries - 1) {
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } else {
+          console.error("Failed to establish WebSocket connection after maximum attempts");
+          connection.close(1011, "Failed to establish WebSocket connection to container");
+
+          if (options.onError) {
+            options.onError(e);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Shuts down the container
+   */
+  shutdownContainer(reason?: string): void {
+    if (!this.ctx.container || !this.ctx.container.running) {
+      return;
+    }
+
+    this.ctx.container.destroy(reason || "Container shutdown requested");
+    
+    // Call shutdown handler
+    this.onShutdown(this.state);
+  }
+
+  /**
+   * Update the container's state
+   */
+  setState(state: ContainerState): void {
+    this.#setStateInternal(state, "server");
+  }
+
+  /**
+   * Internal method to update state and notify clients
+   */
+  #setStateInternal(state: ContainerState, source: Connection | "server" = "server"): void {
+    this.#state = state;
+
+    // Store state in database
+    this.sql`
+      INSERT OR REPLACE INTO container_state (id, state)
+      VALUES (${STATE_ROW_ID}, ${JSON.stringify(state)})
+    `;
+
+    this.sql`
+      INSERT OR REPLACE INTO container_state (id, state)
+      VALUES (${STATE_CHANGED_ID}, ${JSON.stringify(true)})
+    `;
+
+    // Broadcast state change to all clients except the source
+    this.broadcast(
+      JSON.stringify({
+        type: "container_state",
+        state: state,
+      }),
+      source !== "server" ? [source.id] : []
+    );
+
+    // Call onStateUpdate hook
+    this.onStateUpdate(state);
+  }
+
+  /**
+   * Lifecycle method called when container boots successfully
+   * Override this method in subclasses to handle container boot events
+   */
+  onBoot(state?: ContainerState): void | Promise<void> {
+    // Default implementation does nothing
+  }
+  
+  /**
+   * Lifecycle method called when container shuts down
+   * Override this method in subclasses to handle container shutdown events
+   */
+  onShutdown(state?: ContainerState): void | Promise<void> {
+    // Default implementation does nothing
+  }
+  
+  /**
+   * Lifecycle method called when container state is updated
+   * Override this method in subclasses to handle state changes
+   */
+  onStateUpdate(state: ContainerState): void | Promise<void> {
+    // Default implementation does nothing
+  }
+  
+  /**
+   * Error handler for container errors
+   * Override this method in subclasses to handle container errors
+   */
+  onError(error: unknown): any {
+    console.error("Container error:", error);
+    throw error;
+  }
+
+  /**
+   * Try-catch wrapper for async operations
+   */
+  async #tryCatch<T>(fn: () => T | Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (e) {
+      throw this.onError(e);
+    }
+  }
+
+  /**
+   * Handle fetch requests to the Container
+   * Default implementation proxies both HTTP and WebSocket requests to the container
+   */
+  async fetch(request: Request): Promise<Response> {
+    // Check if this is a WebSocket upgrade request
+    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+      // For WebSocket requests, we need to return a Response with webSocket: true
+      // PartyKit will call onConnect with the actual WebSocket connection
+      return new Response(null, {
+        status: 101,
+        webSocket: true
+      });
+    }
+    
+    // For standard HTTP requests, proxy to the container
+    return await this.proxyRequest(request, this.defaultPort);
+  }
+  
+  /**
+   * Default implementation for handling WebSocket connections
+   * This is called by PartyKit when a WebSocket connection is established
+   */
+  override onConnect(connection: Connection, ctx: ConnectionContext): void | Promise<void> {
+    // Call the original onConnect method
+    const originalResult = super.onConnect(connection, ctx);
+    
+    // Check if this connection was initiated from a WebSocket upgrade
+    if (ctx.request?.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
+      // Proxy the WebSocket connection to the container
+      this.ctx.blockConcurrencyWhile(async () => {
+        try {
+          // Make sure we have a request
+          if (!ctx.request) {
+            connection.close(1011, "No request in connection context");
+            return;
+          }
+          
+          // Proxy the WebSocket connection to the container
+          await this.proxyWebSocket(ctx.request, connection, {
+            port: this.defaultPort
+          });
+        } catch (error) {
+          console.error('Error establishing WebSocket connection:', error);
+          connection.close(1011, error instanceof Error ? error.message : "Failed to establish connection");
+        }
+      });
+    }
+    
+    return originalResult;
+  }
+}
