@@ -196,12 +196,16 @@ import { Container } from 'cf-containers-nomitch';
 export class ManualStartContainer extends Container {
   // Configure default port for the container
   defaultPort = 8080;
+  
+  // Disable automatic container startup (preferred way as a class property)
+  explicitContainerStart = true;
 
   constructor(ctx: any, env: any) {
-    // Disable automatic container startup
-    super(ctx, env, {
-      explicitContainerStart: true
-    });
+    // You can also set explicitContainerStart via constructor options
+    // super(ctx, env, {
+    //   explicitContainerStart: true
+    // });
+    super(ctx, env);
   }
 
   /**
@@ -381,7 +385,7 @@ The main class that wraps a container-enbled Durable Object to provide container
 
 - `defaultPort?`: Optional default port to use when communicating with the container. If not set, you must specify port in proxyRequest calls
 - `sleepAfter`: How long to keep the container alive without activity (format: number for seconds, or string like "5m", "30s", "1h")
-- `explicitContainerStart`: If true, container won't start automatically on DO boot (default: false)
+- `explicitContainerStart`: If true, container won't start automatically on DO boot (default: false). Set as a class property or via constructor options.
 - `containerConfig`: Configuration for the container's environment, entrypoint, and network access
 - Lifecycle methods: `onBoot`, `onShutdown`, `onStateUpdate`, `onError`
 - `initialState`: Initial state for the container
@@ -392,7 +396,7 @@ The main class that wraps a container-enbled Durable Object to provide container
 constructor(ctx: any, env: Env, options?: {
   defaultPort?: number;           // Override default port
   sleepAfter?: string | number;   // Override sleep timeout
-  explicitContainerStart?: boolean; // Disable automatic container start
+  explicitContainerStart?: boolean; // Disable automatic container start (prefer setting as class property)
   env?: Record<string, string>;   // Environment variables to pass to the container
   entrypoint?: string[];          // Custom entrypoint to override container default
   enableInternet?: boolean;       // Whether to enable internet access for the container
