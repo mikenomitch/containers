@@ -1,4 +1,4 @@
-import { Server, type Connection, type ConnectionContext, type WebSocket } from "partykit/server";
+import { Server, type Connection, type ConnectionContext, type WebSocket } from "partyserver";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   ContainerOptions,

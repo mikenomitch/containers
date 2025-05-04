@@ -36,7 +36,7 @@ __export(index_exports, {
 module.exports = __toCommonJS(index_exports);
 
 // src/lib/container.ts
-var import_server = require("partykit/server");
+var import_partyserver = require("partyserver");
 var import_node_async_hooks = require("async_hooks");
 var STATE_ROW_ID = "container_state_row_id";
 var STATE_CHANGED_ID = "container_state_changed_id";
@@ -54,7 +54,7 @@ function getCurrentContainer() {
   return store;
 }
 var _sleepTimeoutTaskId, _state, _Container_instances, setStateInternal_fn, tryCatch_fn, scheduleSleepTimeout_fn, cancelSleepTimeout_fn;
-var Container = class extends (import_server.Server || Object) {
+var Container = class extends import_partyserver.Server {
   constructor(ctx, env, options) {
     super(ctx, env);
     __privateAdd(this, _Container_instances);

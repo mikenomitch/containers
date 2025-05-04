@@ -2,7 +2,7 @@
  * Basic types for the container implementation
  */
 
-import type { Party, Connection } from "partykit/server";
+import type { Party, Connection } from "partyserver";
 
 /**
  * Message structure for communication with containers

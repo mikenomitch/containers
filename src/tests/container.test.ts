@@ -1,10 +1,10 @@
-// Mock partykit/server first
-jest.mock('partykit/server');
+// Mock partyserver first
+jest.mock('partyserver');
 
 import { Container } from '../lib/container';
 import { loadBalance } from '../lib/utils';
 import { ContainerState } from '../types';
-import { Server } from 'partykit/server';
+import { Server } from 'partyserver';
 
 // Mock async hooks
 jest.mock('node:async_hooks', () => {
@@ -57,7 +57,7 @@ describe('Container', () => {
             // Check if this is a WebSocket request
             if (init?.headers && (init.headers as Headers).get('Upgrade') === 'websocket') {
               // Create a mock WebSocket
-              const mockWs = new (jest.requireMock('partykit/server').MockWebSocket)();
+              const mockWs = new (jest.requireMock('partyserver').MockWebSocket)();
               return Promise.resolve({
                 status: 101,
                 webSocket: mockWs

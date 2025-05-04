@@ -8,7 +8,7 @@ var __privateSet = (obj, member, value, setter) => (__accessCheck(obj, member, "
 var __privateMethod = (obj, member, method) => (__accessCheck(obj, member, "access private method"), method);
 
 // src/lib/container.ts
-import { Server } from "partykit/server";
+import { Server } from "partyserver";
 import { AsyncLocalStorage } from "node:async_hooks";
 var STATE_ROW_ID = "container_state_row_id";
 var STATE_CHANGED_ID = "container_state_changed_id";
@@ -26,7 +26,7 @@ function getCurrentContainer() {
   return store;
 }
 var _sleepTimeoutTaskId, _state, _Container_instances, setStateInternal_fn, tryCatch_fn, scheduleSleepTimeout_fn, cancelSleepTimeout_fn;
-var Container = class extends (Server || Object) {
+var Container = class extends Server {
   constructor(ctx, env, options) {
     super(ctx, env);
     __privateAdd(this, _Container_instances);

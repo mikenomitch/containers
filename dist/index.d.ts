@@ -1,4 +1,4 @@
-import { Party, Connection } from 'partykit/server';
+import { Party, Connection } from 'partyserver';
 
 /**
  * Basic types for the container implementation

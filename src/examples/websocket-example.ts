@@ -1,5 +1,5 @@
 import { Container } from '../lib/container';
-import type { Connection, ConnectionContext } from 'partykit/server';
+import type { Connection, ConnectionContext } from 'partyserver';
 import type { ContainerState } from '../types';
 
 /**
