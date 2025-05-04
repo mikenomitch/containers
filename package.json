@@ -27,7 +27,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "partyserver": "^0.0.114"
+    "partyserver": "^0.0.68"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
@@ -40,8 +40,5 @@
     "ts-jest": "^29.3.2",
     "tsup": "^8.0.2",
     "typescript": "^5.8.3"
-  },
-  "peerDependencies": {
-    "partyserver": ">=0.0.100"
   }
 }
