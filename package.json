@@ -1,6 +1,6 @@
 {
-  "name": "containers",
-  "version": "1.0.0",
+  "name": "cf-containers",
+  "version": "0.0.3",
   "description": "TypeScript helper class for PartyKit durable object containers",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -12,20 +12,23 @@
     "build": "tsup src/index.ts --format cjs,esm --dts",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts,.tsx",
+    "lint": "eslint src --ext .ts,.tsx --config .eslintrc.js",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "jest",
     "test:watch": "jest --watch",
     "prepare": "npm run build"
   },
   "keywords": [
-    "partykit",
+    "partyserver",
     "containers",
     "durable-objects",
     "cloudflare"
   ],
   "author": "",
   "license": "ISC",
+  "dependencies": {
+    "partyserver": "^0.0.68"
+  },
   "devDependencies": {
     "@types/jest": "^29.5.14",
     "@types/node": "^22.15.3",
@@ -33,13 +36,9 @@
     "@typescript-eslint/parser": "^8.31.1",
     "eslint": "^9.26.0",
     "jest": "^29.7.0",
-    "partykit": "^0.0.114",
     "prettier": "^3.5.3",
     "ts-jest": "^29.3.2",
     "tsup": "^8.0.2",
     "typescript": "^5.8.3"
-  },
-  "peerDependencies": {
-    "partykit": ">=0.0.100"
   }
 }

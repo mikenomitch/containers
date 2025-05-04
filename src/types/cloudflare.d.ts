@@ -18,7 +18,7 @@ declare interface DurableObjectStub {
 }
 
 // PartyKit Server Types
-declare module 'partykit/server' {
+declare module 'partyserver' {
   export class Server<Env = unknown> {
     constructor(ctx: any, env: Env);
     get room(): string;

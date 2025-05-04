@@ -1,5 +1,4 @@
 import { Container } from '../lib/container';
-import type { ContainerState } from '../types';
 
 /**
  * Example implementation of a Container class
@@ -10,12 +9,6 @@ export class MyContainer extends Container {
 
   // Set how long the container should stay active without requests
   sleepAfter = "10m";
-
-  // Optionally define initial state
-  initialState = {
-    startedAt: Date.now(),
-    requestCount: 0
-  };
 
   constructor(ctx: any, env: any) {
     super(ctx, env, {
@@ -29,19 +22,14 @@ export class MyContainer extends Container {
     });
   }
 
-  // Lifecycle method called when container boots
-  override onBoot(state?: ContainerState): void {
-    console.log('Container booted!', state);
+  // Lifecycle method called when container starts
+  override onStart(): void {
+    console.log('Container started!');
   }
 
   // Lifecycle method called when container shuts down
-  override onShutdown(state?: ContainerState): void {
-    console.log('Container shutdown!', state);
-  }
-
-  // Lifecycle method called when state is updated
-  override onStateUpdate(state: ContainerState): void {
-    console.log('State updated:', state);
+  override onStop(): void {
+    console.log('Container stopped!');
   }
 
   // Lifecycle method called on errors
@@ -52,16 +40,8 @@ export class MyContainer extends Container {
 
   // Handle incoming requests
   async fetch(request: Request): Promise<Response> {
-    // Update state to track requests
-    const currentState = this.state;
-    this.setState({
-      ...currentState,
-      requestCount: (currentState.requestCount as number || 0) + 1,
-      lastRequestAt: Date.now()
-    });
-
     // Default implementation proxies requests to the container
-    return await this.proxyRequest(request);
+    return await this.containerFetch(request);
   }
 
   // Additional custom methods can be implemented as needed

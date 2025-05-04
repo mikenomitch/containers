@@ -1,5 +1,4 @@
 import { Container } from '../lib/container';
-import type { ContainerState } from '../types';
 
 /**
  * Example implementation of a Container with WebSocket proxying
@@ -11,14 +10,6 @@ export class WebSocketProxyContainer extends Container {
 
   // Set how long the container should stay active without activity
   sleepAfter = "15m";
-
-  // Track WebSocket message statistics
-  initialState = {
-    startedAt: Date.now(),
-    wsConnections: 0,
-    wsMessages: 0,
-    httpRequests: 0
-  };
 
   constructor(ctx: any, env: any) {
     super(ctx, env, {
@@ -34,12 +25,12 @@ export class WebSocketProxyContainer extends Container {
   }
 
   // Lifecycle methods
-  override onBoot(state?: ContainerState): void {
-    console.log('Container booted with WebSocket support');
+  override onStart(): void {
+    console.log('Container started with WebSocket support');
   }
 
-  override onShutdown(state?: ContainerState): void {
-    console.log('Container shutdown with stats:', state);
+  override onStop(): void {
+    console.log('Container stopped');
   }
 
   override onError(error: unknown): any {
@@ -52,35 +43,26 @@ export class WebSocketProxyContainer extends Container {
    */
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const currentState = this.state;
     
     // Check if this is a WebSocket upgrade request
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      // Update connection stats
-      this.setState({
-        ...currentState,
-        wsConnections: (currentState.wsConnections as number || 0) + 1
-      });
-      
       // Proxy WebSocket to the container
       // This automatically renews the activity timeout on each message
-      return this.proxyWebSocket(request, this.defaultPort);
+      return this.containerFetch(request, this.defaultPort);
     }
     
     // Handle special endpoint to check stats
     if (url.pathname === '/stats') {
-      return new Response(JSON.stringify(this.state, null, 2), {
+      return new Response(JSON.stringify({
+        status: 'ok',
+        port: this.defaultPort,
+        sleepAfter: this.sleepAfter
+      }, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
     
-    // Track HTTP request count
-    this.setState({
-      ...currentState,
-      httpRequests: (currentState.httpRequests as number || 0) + 1
-    });
-    
     // For regular HTTP requests, use standard proxying
-    return await this.proxyRequest(request, this.defaultPort);
+    return await this.containerFetch(request, this.defaultPort);
   }
 }

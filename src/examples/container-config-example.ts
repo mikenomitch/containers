@@ -1,5 +1,4 @@
 import { Container } from '../lib/container';
-import type { ContainerState } from '../types';
 
 /**
  * Example implementation showing container configuration options
@@ -8,40 +7,36 @@ export class ConfiguredContainer extends Container {
   // Default port for the container
   defaultPort = 9000;
 
-  // Override the default container configuration
-  containerConfig = {
-    // Environment variables to pass to the container
-    env: {
-      NODE_ENV: 'production',
-      LOG_LEVEL: 'info',
-      APP_PORT: '9000',
-      API_URL: 'https://api.example.com'
-    },
-
-    // Custom entrypoint to run in the container
-    entrypoint: ['node', 'server.js', '--config', 'production.json'],
-
-    // Enable internet access for the container
-    enableInternet: true
+  // Environment variables to pass to the container
+  env = {
+    NODE_ENV: 'production',
+    LOG_LEVEL: 'info',
+    APP_PORT: '9000',
+    API_URL: 'https://api.example.com'
   };
 
-  // Sample initial state
-  initialState = {
-    startedAt: Date.now(),
-    configVersion: 'v1.0'
-  };
+  // Custom entrypoint to run in the container
+  entrypoint = ['node', 'server.js', '--config', 'production.json'];
+
+  // Enable internet access for the container
+  enableInternet = true;
 
   constructor(ctx: any, env: any) {
-    // You can also override or extend containerConfig values in the constructor
+    // Container configuration is set via instance properties
     super(ctx, env);
 
-    // You can modify containerConfig after construction if needed
-    // this.containerConfig.env.FEATURE_FLAGS = 'beta,analytics';
+    // You can also modify config properties here if needed
+    // this.env.ADDITIONAL_VAR = 'some value';
   }
 
-  // Lifecycle method called when container boots
-  override onBoot(state?: ContainerState): void {
-    console.log('Container booted with config:', this.containerConfig);
+  // Lifecycle method called when container starts
+  override onStart(): void {
+    const config = {
+      env: this.env,
+      entrypoint: this.entrypoint,
+      enableInternet: this.enableInternet
+    };
+    console.log('Container started with config:', config);
   }
 
   // Override the fetch method to customize request handling
@@ -50,16 +45,20 @@ export class ConfiguredContainer extends Container {
 
     // Special endpoint to view current configuration
     if (url.pathname === '/config') {
+      const config = {
+        env: this.env,
+        entrypoint: this.entrypoint,
+        enableInternet: this.enableInternet
+      };
       return new Response(JSON.stringify({
         port: this.defaultPort,
-        config: this.containerConfig,
-        state: this.state
+        config: config
       }, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
     // For other requests, proxy to the container
-    return await this.proxyRequest(request);
+    return await this.containerFetch(request);
   }
 }

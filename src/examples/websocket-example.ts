@@ -1,6 +1,5 @@
 import { Container } from '../lib/container';
-import type { Connection, ConnectionContext } from 'partykit/server';
-import type { ContainerState } from '../types';
+import type { Connection, ConnectionContext } from 'partyserver';
 
 /**
  * Example implementation of a Container class with WebSocket support via custom endpoint
@@ -20,14 +19,14 @@ export class WebSocketContainer extends Container {
     super(ctx, env);
   }
 
-  // Lifecycle method called when container boots
-  override onBoot(state?: ContainerState): void {
-    console.log('Container booted for WebSocket connections');
+  // Lifecycle method called when container starts
+  override onStart(): void {
+    console.log('Container started for WebSocket connections');
   }
 
   // Lifecycle method called when container shuts down
-  override onShutdown(state?: ContainerState): void {
-    console.log('Container shutdown');
+  override onStop(): void {
+    console.log('Container stopped');
   }
 
   // Lifecycle method called on errors
@@ -49,7 +48,7 @@ export class WebSocketContainer extends Container {
       // Ensure container is running
       if (!this.ctx.container?.running) {
         try {
-          await this.startAndWaitForPort();
+          await this.startAndWaitForPorts();
         } catch (e) {
           return new Response('Container failed to start', { status: 500 });
         }
@@ -67,7 +66,7 @@ export class WebSocketContainer extends Container {
     }
 
     // For all other requests, proxy to the container
-    return await this.proxyRequest(request);
+    return await this.containerFetch(request);
   }
 
   // Additional helper methods can be implemented as needed

@@ -1,5 +1,4 @@
 import { Container } from '../lib/container';
-import type { ContainerState } from '../types';
 
 /**
  * Example implementation of a Container with custom timeout settings
@@ -11,42 +10,23 @@ export class TimeoutContainer extends Container {
   // Customize the sleep timeout to 30 minutes
   sleepAfter = "30m";
 
-  // Sample initial state with timestamp
-  initialState = {
-    startedAt: Date.now(),
-    activityCount: 0
-  };
-
   constructor(ctx: any, env: any) {
     super(ctx, env);
   }
 
-  // Lifecycle method called when container boots
-  override onBoot(state?: ContainerState): void {
-    console.log('Container booted with timeout set to:', this.sleepAfter);
+  // Lifecycle method called when container starts
+  override onStart(): void {
+    console.log('Container started with timeout set to:', this.sleepAfter);
   }
 
   // Lifecycle method called when container shuts down
-  override onShutdown(state?: ContainerState): void {
-    console.log('Container shutdown. Activity count:', state?.activityCount);
+  override onStop(): void {
+    console.log('Container stopped.');
   }
 
   // Custom method that will renew the activity timeout
   async performBackgroundTask(data: any): Promise<void> {
     console.log('Performing background task with data:', data);
-    
-    // Update the state to track activity
-    const currentState = this.state;
-    
-    this.setState({
-      ...currentState,
-      activityCount: (currentState.activityCount as number || 0) + 1,
-      lastActivity: {
-        type: 'background',
-        timestamp: Date.now(),
-        data
-      }
-    });
     
     // This will renew the activity timeout
     await this.renewActivityTimeout();
@@ -70,7 +50,7 @@ export class TimeoutContainer extends Container {
       return new Response(JSON.stringify({
         success: true,
         message: 'Background task executed',
-        nextShutdown: `Container will shut down after ${this.sleepAfter} of inactivity`
+        nextStop: `Container will shut down after ${this.sleepAfter} of inactivity`
       }), {
         headers: { 'Content-Type': 'application/json' }
       });
@@ -79,27 +59,14 @@ export class TimeoutContainer extends Container {
     // Endpoint to view timeout status
     if (url.pathname === '/timeout-status') {
       return new Response(JSON.stringify({
-        sleepAfter: this.sleepAfter,
-        state: this.state
+        sleepAfter: this.sleepAfter
       }, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
     
-    // Update state to track HTTP requests
-    const currentState = this.state;
-    this.setState({
-      ...currentState,
-      activityCount: (currentState.activityCount as number || 0) + 1,
-      lastActivity: {
-        type: 'http',
-        timestamp: Date.now(),
-        path: url.pathname
-      }
-    });
-    
     // For all other requests, proxy to the container
     // This will automatically renew the activity timeout
-    return await this.proxyRequest(request);
+    return await this.containerFetch(request);
   }
 }
