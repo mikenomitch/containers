@@ -36,11 +36,6 @@ var Container = class extends Server {
     __privateAdd(this, _sleepTimeoutTaskId, null);
     // Whether to require explicit container start (if false, it starts automatically)
     this.explicitContainerStart = false;
-    // Default container configuration
-    this.containerConfig = {
-      env: {},
-      enableInternet: true
-    };
     // Internal state
     __privateAdd(this, _state, DEFAULT_STATE);
     /**
@@ -51,9 +46,6 @@ var Container = class extends Server {
       if (options.defaultPort !== void 0) this.defaultPort = options.defaultPort;
       if (options.sleepAfter !== void 0) this.sleepAfter = options.sleepAfter;
       if (options.explicitContainerStart !== void 0) this.explicitContainerStart = options.explicitContainerStart;
-      if (options.env) this.containerConfig.env = options.env;
-      if (options.entrypoint) this.containerConfig.entrypoint = options.entrypoint;
-      if (options.enableInternet !== void 0) this.containerConfig.enableInternet = options.enableInternet;
     }
     this.sql`
       CREATE TABLE IF NOT EXISTS container_state (
@@ -122,10 +114,11 @@ var Container = class extends Server {
       throw new Error("No container found in context");
     }
     if (!this.ctx.container.running) {
+      const config = this.constructor.containerConfig;
       this.ctx.container.start({
-        env: this.containerConfig.env,
-        entrypoint: this.containerConfig.entrypoint,
-        enableInternet: this.containerConfig.enableInternet
+        env: config.env,
+        entrypoint: config.entrypoint,
+        enableInternet: config.enableInternet
       });
     }
     try {
@@ -442,6 +435,14 @@ cancelSleepTimeout_fn = async function() {
     }
     __privateSet(this, _sleepTimeoutTaskId, null);
   }
+};
+/**
+ * Default container configuration
+ * Configure at class level by overriding in your subclass
+ */
+Container.containerConfig = {
+  env: {},
+  enableInternet: true
 };
 /**
  * Container configuration options

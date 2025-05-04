@@ -66,7 +66,11 @@ declare class Container<Env = unknown> extends Server<Env> {
     defaultPort?: number;
     sleepAfter: string | number;
     explicitContainerStart: boolean;
-    containerConfig: {
+    /**
+     * Default container configuration
+     * Configure at class level by overriding in your subclass
+     */
+    static containerConfig: {
         env?: Record<string, string>;
         entrypoint?: string[];
         enableInternet?: boolean;

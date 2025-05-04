@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">50.99% </span>
+                <span class="strong">52.79% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>103/202</span>
+                <span class='fraction'>104/197</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">46.47% </span>
+                <span class="strong">48.52% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>33/71</span>
+                <span class='fraction'>33/68</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">52.87% </span>
+                <span class="strong">53.96% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>101/191</span>
+                <span class='fraction'>102/189</span>
             </div>
         
             
@@ -710,7 +710,10 @@
 <a name='L645'></a><a href='#L645'>645</a>
 <a name='L646'></a><a href='#L646'>646</a>
 <a name='L647'></a><a href='#L647'>647</a>
-<a name='L648'></a><a href='#L648'>648</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
+<a name='L648'></a><a href='#L648'>648</a>
+<a name='L649'></a><a href='#L649'>649</a>
+<a name='L650'></a><a href='#L650'>650</a>
+<a name='L651'></a><a href='#L651'>651</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -771,7 +774,10 @@
 <span class="cline-any cline-yes">12x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">12x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -865,9 +871,7 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -907,6 +911,8 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">13x</span>
 <span class="cline-any cline-yes">13x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1410,15 +1416,18 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
 &nbsp;
   // Timeout after which the container will sleep if no activity
   sleepAfter: string | number = "5m";
-  
+&nbsp;
   // Internal tracking for sleep timeout task
   #sleepTimeoutTaskId: string | null = null;
 &nbsp;
   // Whether to require explicit container start (if false, it starts automatically)
   explicitContainerStart = false;
 &nbsp;
-  // Default container configuration
-  containerConfig: {
+  /**
+   * Default container configuration
+   * Configure at class level by overriding in your subclass
+   */
+  static containerConfig: {
     env?: Record&lt;string, string&gt;;
     entrypoint?: string[];
     enableInternet?: boolean;
@@ -1511,10 +1520,8 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
 <span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (options.sleepAfter !== undefined) <span class="cstat-no" title="statement not covered" >this.sleepAfter = options.sleepAfter;</span></span>
 <span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (options.explicitContainerStart !== undefined) <span class="cstat-no" title="statement not covered" >this.explicitContainerStart = options.explicitContainerStart;</span></span>
 &nbsp;
-      // Apply container configuration if provided
-<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (options.env) <span class="cstat-no" title="statement not covered" >this.containerConfig.env = options.env;</span></span>
-<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (options.entrypoint) <span class="cstat-no" title="statement not covered" >this.containerConfig.entrypoint = options.entrypoint;</span></span>
-<span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (options.enableInternet !== undefined) <span class="cstat-no" title="statement not covered" >this.containerConfig.enableInternet = options.enableInternet;</span></span>
+      // Instance-specific container configuration overrides are no longer supported
+      // If you need to customize container config, extend the Container class and override the static containerConfig
     }
 &nbsp;
     // Create state table if it doesn't exist
@@ -1554,10 +1561,12 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
 &nbsp;
     // Start the container if it's not running
     if (!this.ctx.container.running) {
+      // Use the static class configuration
+      const config = (this.constructor as typeof Container).containerConfig;
       this.ctx.container.start({
-        env: this.containerConfig.env,
-        entrypoint: this.containerConfig.entrypoint,
-        enableInternet: this.containerConfig.enableInternet,
+        env: config.env,
+        entrypoint: config.entrypoint,
+        enableInternet: config.enableInternet,
       });
     }
 &nbsp;
@@ -1620,7 +1629,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
     if (port === undefined &amp;&amp; this.defaultPort === undefined) {
       throw new Error("No port specified for proxy request. Set defaultPort or specify a port parameter.");
     }
-    
+&nbsp;
     // Use specified port or defaultPort
     const targetPort = port ?? this.defaultPort;
 &nbsp;
@@ -1765,7 +1774,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
   async #scheduleSleepTimeout(): Promise&lt;void&gt; {
     // Convert the sleepAfter value to seconds
     let timeoutInSeconds: number;
-    
+&nbsp;
     <span class="missing-if-branch" title="if path not taken" >I</span>if (typeof this.sleepAfter === 'number') {
       // If it's already a number, assume it's in seconds
 <span class="cstat-no" title="statement not covered" >      timeoutInSeconds = this.sleepAfter;</span>
@@ -1778,7 +1787,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
       } else {
         const value = parseInt(match[1]);
         const unit = match[2];
-        
+&nbsp;
         // Convert to seconds based on unit
         switch (unit) {
 <span class="branch-0 cbranch-no" title="branch not covered" >          case 's': <span class="cstat-no" title="statement not covered" >timeoutInSeconds = value; <span class="cstat-no" title="statement not covered" ></span>break;</span></span>
@@ -1791,15 +1800,15 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
       // Default to 5 minutes
 <span class="cstat-no" title="statement not covered" >      timeoutInSeconds = 300;</span>
     }
-    
+&nbsp;
     // Cancel any existing timeout
     await this.#cancelSleepTimeout();
-    
+&nbsp;
     // Schedule the container shutdown
     const { taskId } = await this.schedule(timeoutInSeconds, "shutdownDueToInactivity");
     this.#sleepTimeoutTaskId = taskId;
   }
-  
+&nbsp;
   /**
    * Cancel the scheduled sleep timeout if one exists
    * @private
@@ -1814,7 +1823,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
       this.#sleepTimeoutTaskId = null;
     }
   }
-  
+&nbsp;
   /**
    * Renew the container's activity timeout
    * Call this method whenever there is activity on the container
@@ -1824,18 +1833,18 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
       await this.#scheduleSleepTimeout();
     }
   }
-  
+&nbsp;
   /**
    * Method called by scheduled task to shutdown the container due to inactivity
    */
 <span class="fstat-no" title="function not covered" >  async </span>shutdownDueToInactivity(): Promise&lt;void&gt; {
     // Clear the task ID since it's been executed
 <span class="cstat-no" title="statement not covered" >    this.#sleepTimeoutTaskId = null;</span>
-    
+&nbsp;
     // Shutdown the container if it's still running
 <span class="cstat-no" title="statement not covered" >    this.shutdownContainer("Container shut down due to inactivity timeout");</span>
   }
-  
+&nbsp;
   /**
    * Proxy a WebSocket connection to the container
    * @param request The WebSocket upgrade request
@@ -1851,7 +1860,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
     <span class="missing-if-branch" title="if path not taken" >I</span>if (port === undefined &amp;&amp; this.defaultPort === undefined) {
 <span class="cstat-no" title="statement not covered" >      throw new Error("No port specified for WebSocket proxy. Set defaultPort or specify a port parameter.");</span>
     }
-    
+&nbsp;
     // Use specified port or defaultPort
     const targetPort = port ?? this.defaultPort;
 &nbsp;
@@ -1861,43 +1870,43 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
         // Start container and wait for port to be ready
 <span class="cstat-no" title="statement not covered" >        await this.startAndWaitForPort(targetPort);</span>
       } catch (e) {
-<span class="cstat-no" title="statement not covered" >        return new Response(`Failed to start container for WebSocket: ${e instanceof Error ? e.message : String(e)}`, </span>
+<span class="cstat-no" title="statement not covered" >        return new Response(`Failed to start container for WebSocket: ${e instanceof Error ? e.message : String(e)}`,</span>
           { status: 500 });
       }
     }
 &nbsp;
     // Get TCP port
     const tcpPort = this.ctx.container.getTcpPort(targetPort!);
-    
-    // Renew the activity timeout 
+&nbsp;
+    // Renew the activity timeout
     await this.renewActivityTimeout();
 &nbsp;
     try {
       // Create a WebSocket connection to the container
-      const containerRes = await tcpPort.fetch("http://container/ws", { 
+      const containerRes = await tcpPort.fetch("http://container/ws", {
         headers: {
           'Upgrade': 'websocket',
           'Connection': 'Upgrade'
         }
       });
-      
+&nbsp;
       // Check if we got a WebSocket from the container
       // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
 <span class="cstat-no" title="statement not covered" >      <span class="missing-if-branch" title="if path not taken" >I</span>if (!containerRes.webSocket) {</span>
 <span class="cstat-no" title="statement not covered" >        return new Response('Container WebSocket server is not available', { status: 500 });</span>
       }
-      
+&nbsp;
       // Create a WebSocket pair for the client
       // @ts-ignore - WebSocketPair is provided by PartyKit
       const pair = <span class="cstat-no" title="statement not covered" >new WebSocketPair();</span>
       const clientWs = <span class="cstat-no" title="statement not covered" >pair[0];</span>
       const serverWs = <span class="cstat-no" title="statement not covered" >pair[1];</span>
-      
+&nbsp;
       // Accept the WebSocket connection from the client
 <span class="cstat-no" title="statement not covered" >      serverWs.accept();</span>
       // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
 <span class="cstat-no" title="statement not covered" >      containerRes.webSocket.accept();</span>
-      
+&nbsp;
       // Forward messages from client to container
 <span class="cstat-no" title="statement not covered" >      serverWs.addEventListener('message', <span class="fstat-no" title="function not covered" >(e</span>vent: { data: string | ArrayBufferLike }) =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >        try {</span>
@@ -1910,7 +1919,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
 <span class="cstat-no" title="statement not covered" >          console.error('Error forwarding message to container:', e);</span>
         }
       });
-      
+&nbsp;
       // Forward messages from container to client
       // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
 <span class="cstat-no" title="statement not covered" >      containerRes.webSocket.addEventListener('message', <span class="fstat-no" title="function not covered" >(e</span>vent: { data: string | ArrayBufferLike }) =&gt; {</span>
@@ -1923,7 +1932,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
 <span class="cstat-no" title="statement not covered" >          console.error('Error forwarding message to client:', e);</span>
         }
       });
-      
+&nbsp;
       // Handle client closing the connection
 <span class="cstat-no" title="statement not covered" >      serverWs.addEventListener('close', <span class="fstat-no" title="function not covered" >(e</span>vent: { code: number; reason: string }) =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >        try {</span>
@@ -1933,7 +1942,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
 <span class="cstat-no" title="statement not covered" >          console.error('Error closing container WebSocket:', e);</span>
         }
       });
-      
+&nbsp;
       // Handle container closing the connection
       // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
 <span class="cstat-no" title="statement not covered" >      containerRes.webSocket.addEventListener('close', <span class="fstat-no" title="function not covered" >(e</span>vent: { code: number; reason: string }) =&gt; {</span>
@@ -1943,7 +1952,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
 <span class="cstat-no" title="statement not covered" >          console.error('Error closing client WebSocket:', e);</span>
         }
       });
-      
+&nbsp;
       // Handle errors on both sides
 <span class="cstat-no" title="statement not covered" >      serverWs.addEventListener('error', <span class="fstat-no" title="function not covered" >(e</span>vent: any) =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >        console.error('Client WebSocket error:', event);</span>
@@ -1954,7 +1963,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
           // Ignore
         }
       });
-      
+&nbsp;
       // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
 <span class="cstat-no" title="statement not covered" >      containerRes.webSocket.addEventListener('error', <span class="fstat-no" title="function not covered" >(e</span>vent: any) =&gt; {</span>
 <span class="cstat-no" title="statement not covered" >        console.error('Container WebSocket error:', event);</span>
@@ -1964,7 +1973,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
           // Ignore
         }
       });
-      
+&nbsp;
       // Return the client side of the WebSocket pair
 <span class="cstat-no" title="statement not covered" >      return new Response(null, {</span>
         status: 101,
@@ -1973,7 +1982,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
       });
     } catch (e) {
       console.error('Error establishing WebSocket connection:', e);
-      return new Response(`Error establishing WebSocket connection: ${e instanceof Error ? e.message : <span class="branch-1 cbranch-no" title="branch not covered" >String(e)}</span>`, 
+      return new Response(`Error establishing WebSocket connection: ${e instanceof Error ? e.message : <span class="branch-1 cbranch-no" title="branch not covered" >String(e)}</span>`,
         { status: 500 });
     }
   }
@@ -1986,7 +1995,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
   async fetch(request: Request): Promise&lt;Response&gt; {
     // Renew the activity timeout whenever a request is received
     await this.renewActivityTimeout();
-    
+&nbsp;
     // Check if default port is set
     <span class="missing-if-branch" title="if path not taken" >I</span>if (this.defaultPort === undefined) {
 <span class="cstat-no" title="statement not covered" >      return new Response(</span>
@@ -1994,12 +2003,12 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
         { status: 500 }
       );
     }
-    
+&nbsp;
     // Check if this is a WebSocket upgrade request
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
       return this.proxyWebSocket(request, this.defaultPort);
     }
-    
+&nbsp;
     // Proxy the HTTP request to the container
     return await this.proxyRequest(request, this.defaultPort);
   }
@@ -2011,7 +2020,7 @@ export class Container&lt;Env = unknown&gt; extends Server&lt;Env&gt; {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2025-05-04T05:59:15.539Z
+                at 2025-05-04T06:48:12.374Z
             </div>
         <script src="../../prettify.js"></script>
         <script>

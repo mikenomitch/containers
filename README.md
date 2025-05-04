@@ -1,6 +1,6 @@
 # Containers
 
-A TypeScript helper class that wraps PartyKit durable objects and provides helper methods for interacting with containers, while hiding the durable object implementation details.
+A class for interacting with Containers on Cloudflare Workers.
 
 ## Features
 
@@ -39,23 +39,6 @@ export class MyContainer extends Container {
     startedAt: Date.now(),
     requestCount: 0
   };
-
-  // Constructor with options
-  constructor(ctx: any, env: any) {
-    // Pass options to control container behavior
-    super(ctx, env, {
-      // If true, container won't start automatically - you must call startAndWaitForPort manually
-      // explicitContainerStart: false, // Default is false - container starts automatically
-
-      // Container configuration
-      env: {
-        NODE_ENV: "production",
-        LOG_LEVEL: "info"
-      },
-      entrypoint: ["node", "server.js"],
-      enableInternet: true
-    });
-  }
 
   // Lifecycle method called when container boots
   override onBoot(state?: ContainerState): void {
@@ -392,7 +375,7 @@ export default {
 
 ### Container Class
 
-The main class that wraps PartyKit's Server to provide container functionality.
+The main class that wraps a container-enbled Durable Object to provide container functionality.
 
 #### Properties
 

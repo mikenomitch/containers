@@ -8,8 +8,8 @@ export class ConfiguredContainer extends Container {
   // Default port for the container
   defaultPort = 9000;
 
-  // Override the default container configuration
-  containerConfig = {
+  // Override the default container configuration at class level
+  static override containerConfig = {
     // Environment variables to pass to the container
     env: {
       NODE_ENV: 'production',
@@ -32,16 +32,17 @@ export class ConfiguredContainer extends Container {
   };
 
   constructor(ctx: any, env: any) {
-    // You can also override or extend containerConfig values in the constructor
+    // Container configuration should be set at class level using static containerConfig
     super(ctx, env);
-
-    // You can modify containerConfig after construction if needed
-    // this.containerConfig.env.FEATURE_FLAGS = 'beta,analytics';
+    
+    // No longer supports modifying containerConfig at instance level
+    // If you need dynamic configuration, consider using state instead
   }
 
   // Lifecycle method called when container boots
   override onBoot(state?: ContainerState): void {
-    console.log('Container booted with config:', this.containerConfig);
+    const config = (this.constructor as typeof Container).containerConfig;
+    console.log('Container booted with config:', config);
   }
 
   // Override the fetch method to customize request handling
@@ -50,9 +51,10 @@ export class ConfiguredContainer extends Container {
 
     // Special endpoint to view current configuration
     if (url.pathname === '/config') {
+      const config = (this.constructor as typeof Container).containerConfig;
       return new Response(JSON.stringify({
         port: this.defaultPort,
-        config: this.containerConfig,
+        config: config,
         state: this.state
       }, null, 2), {
         headers: { 'Content-Type': 'application/json' }

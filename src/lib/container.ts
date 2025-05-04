@@ -58,8 +58,11 @@ export class Container<Env = unknown> extends Server<Env> {
   // Whether to require explicit container start (if false, it starts automatically)
   explicitContainerStart = false;
 
-  // Default container configuration
-  containerConfig: {
+  /**
+   * Default container configuration
+   * Configure at class level by overriding in your subclass
+   */
+  static containerConfig: {
     env?: Record<string, string>;
     entrypoint?: string[];
     enableInternet?: boolean;
@@ -152,10 +155,8 @@ export class Container<Env = unknown> extends Server<Env> {
       if (options.sleepAfter !== undefined) this.sleepAfter = options.sleepAfter;
       if (options.explicitContainerStart !== undefined) this.explicitContainerStart = options.explicitContainerStart;
 
-      // Apply container configuration if provided
-      if (options.env) this.containerConfig.env = options.env;
-      if (options.entrypoint) this.containerConfig.entrypoint = options.entrypoint;
-      if (options.enableInternet !== undefined) this.containerConfig.enableInternet = options.enableInternet;
+      // Instance-specific container configuration overrides are no longer supported
+      // If you need to customize container config, extend the Container class and override the static containerConfig
     }
 
     // Create state table if it doesn't exist
@@ -195,10 +196,12 @@ export class Container<Env = unknown> extends Server<Env> {
 
     // Start the container if it's not running
     if (!this.ctx.container.running) {
+      // Use the static class configuration
+      const config = (this.constructor as typeof Container).containerConfig;
       this.ctx.container.start({
-        env: this.containerConfig.env,
-        entrypoint: this.containerConfig.entrypoint,
-        enableInternet: this.containerConfig.enableInternet,
+        env: config.env,
+        entrypoint: config.entrypoint,
+        enableInternet: config.enableInternet,
       });
     }
 
