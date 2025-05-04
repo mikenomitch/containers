@@ -1,4 +1,4 @@
-import { Party, Connection, Server } from 'partykit/server';
+import { Party, Connection } from 'partykit/server';
 
 /**
  * Basic types for the container implementation
@@ -58,10 +58,11 @@ declare function getCurrentContainer<T extends Container = Container>(): {
     connection: Connection | undefined;
     request: Request | undefined;
 };
+declare const Container_base: any;
 /**
  * Main Container class that wraps PartyKit's Server with container functionality
  */
-declare class Container<Env = unknown> extends Server<Env> {
+declare class Container<Env = unknown> extends Container_base {
     #private;
     defaultPort?: number;
     sleepAfter: string | number;

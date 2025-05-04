@@ -45,7 +45,7 @@ export function getCurrentContainer<T extends Container = Container>(): {
 /**
  * Main Container class that wraps PartyKit's Server with container functionality
  */
-export class Container<Env = unknown> extends Server<Env> {
+export class Container<Env = unknown> extends (Server as any) {
   // Default port for the container (undefined means no default port)
   defaultPort?: number;
 

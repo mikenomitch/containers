@@ -54,7 +54,7 @@ function getCurrentContainer() {
   return store;
 }
 var _sleepTimeoutTaskId, _state, _Container_instances, setStateInternal_fn, tryCatch_fn, scheduleSleepTimeout_fn, cancelSleepTimeout_fn;
-var Container = class extends import_server.Server {
+var Container = class extends (import_server.Server || Object) {
   constructor(ctx, env, options) {
     super(ctx, env);
     __privateAdd(this, _Container_instances);
