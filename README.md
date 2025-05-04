@@ -15,7 +15,7 @@ A class for interacting with Containers on Cloudflare Workers.
 ## Installation
 
 ```bash
-npm install containers
+npm install cf-containers-nomitch
 ```
 
 ## Usage
@@ -23,8 +23,8 @@ npm install containers
 ### Basic HTTP Example
 
 ```typescript
-import { Container } from 'containers';
-import type { ContainerState } from 'containers';
+import { Container } from 'cf-containers-nomitch';
+import type { ContainerState } from 'cf-containers-nomitch';
 
 export class MyContainer extends Container {
   // Configure default port for the container
@@ -98,8 +98,8 @@ The Container class automatically supports proxying WebSocket connections to you
 Here's an example of a Container class that supports both HTTP and WebSocket proxying:
 
 ```typescript
-import { Container } from 'containers';
-import type { ContainerState } from 'containers';
+import { Container } from 'cf-containers-nomitch';
+import type { ContainerState } from 'cf-containers-nomitch';
 
 export class WebSocketProxyContainer extends Container {
   // Configure default port for the container
@@ -157,7 +157,7 @@ The default fetch implementation will automatically detect WebSocket upgrade req
 You can configure how the container starts using the `containerConfig` property:
 
 ```typescript
-import { Container } from 'containers';
+import { Container } from 'cf-containers-nomitch';
 
 export class ConfiguredContainer extends Container {
   // Default port for the container
@@ -191,7 +191,7 @@ export class ConfiguredContainer extends Container {
 For more control over container lifecycle, you can use the `explicitContainerStart` option to disable automatic container startup:
 
 ```typescript
-import { Container } from 'containers';
+import { Container } from 'cf-containers-nomitch';
 
 export class ManualStartContainer extends Container {
   // Configure default port for the container
@@ -235,8 +235,8 @@ export class ManualStartContainer extends Container {
 You can create a container that doesn't use a default port and instead routes traffic to different ports based on request path or other factors:
 
 ```typescript
-import { Container } from 'containers';
-import type { ContainerState } from 'containers';
+import { Container } from 'cf-containers-nomitch';
+import type { ContainerState } from 'cf-containers-nomitch';
 
 export class MultiPortContainer extends Container {
   // No defaultPort defined - we'll handle port specification manually
@@ -278,8 +278,8 @@ export class MultiPortContainer extends Container {
 The Container class includes an automatic idle timeout feature that will shut down the container after a period of inactivity. This helps save resources when containers are not in use.
 
 ```typescript
-import { Container } from 'containers';
-import type { ContainerState } from 'containers';
+import { Container } from 'cf-containers-nomitch';
+import type { ContainerState } from 'cf-containers-nomitch';
 
 export class TimeoutContainer extends Container {
   // Configure default port for the container
@@ -342,7 +342,7 @@ export class TimeoutContainer extends Container {
 ### Using Load Balancing
 
 ```typescript
-import { Container, loadBalance } from 'containers';
+import { Container, loadBalance } from 'cf-containers-nomitch';
 
 export class MyContainer extends Container {
   defaultPort = 8080;
