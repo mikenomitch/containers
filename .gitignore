@@ -3,3 +3,5 @@
 **/.claude/
 **/ctx/
 **/node_modules/
+**/dist/
+**/coverage/
