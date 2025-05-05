@@ -18,7 +18,91 @@ A class for interacting with Containers on Cloudflare Workers.
 npm install cf-containers-nomitch
 ```
 
-## Usage
+## Basic Example
+
+```typescript
+import { Container, loadBalance } from 'cf-containers-nomitch';
+import htmlTemplate from "./template";
+
+export class MyContainer extends Container {
+  // Configure default port for the container
+  defaultPort = 8080;
+}
+
+export default {
+  async fetch(request, env) {
+    const pathname = new URL(request.url).pathname;
+
+    // If you wish to route requests to a specific container,
+    // pass a container identifier to .get()
+
+    if (pathname.startsWith("/specific/")) {
+      // In this case, each unique pathname will spawn a new container
+      let id = env.MY_CONTAINER.idFromName(pathname);
+      let stub = env.MY_CONTAINER.get(id);
+      return await stub.fetch(request);
+    }
+
+    // Otherwise, fall back to one of 5 containers
+    let container = await loadBalance(env.MY_CONTAINER, 5); // 5 is instance count
+    return await container.fetch(request);
+  },
+};
+```
+
+## API Reference
+
+### Container Class
+
+The main class that wraps a container-enbled Durable Object to provide container functionality.
+
+#### Properties
+
+- `defaultPort?`: Optional default port to use when communicating with the container. If not set, you must specify port in proxyRequest calls
+- `sleepAfter`: How long to keep the container alive without activity (format: number for seconds, or string like "5m", "30s", "1h")
+- `explicitContainerStart`: If true, container won't start automatically on DO boot (default: false). Set as a class property or via constructor options.
+- `containerConfig`: Configuration for the container's environment, entrypoint, and network access
+- Lifecycle methods: `onBoot`, `onShutdown`, `onStateUpdate`, `onError`
+- `initialState`: Initial state for the container
+
+#### Constructor Options
+
+```typescript
+constructor(ctx: any, env: Env, options?: {
+  defaultPort?: number;           // Override default port
+  sleepAfter?: string | number;   // Override sleep timeout
+  explicitContainerStart?: boolean; // Disable automatic container start (prefer setting as class property)
+  env?: Record<string, string>;   // Environment variables to pass to the container
+  entrypoint?: string[];          // Custom entrypoint to override container default
+  enableInternet?: boolean;       // Whether to enable internet access for the container
+})
+```
+
+#### Methods
+
+##### Lifecycle Methods
+- `onBoot(state?)`: Called when container boots successfully - override to add custom behavior
+- `onShutdown(state?)`: Called when container shuts down - override to add custom behavior
+- `onStateUpdate(state)`: Called when container state is updated - override to add custom behavior
+- `onError(error)`: Called when container encounters an error - override to add custom behavior
+
+##### Container Methods
+- `startAndWaitForPort(port?, maxTries?)`: Starts the container and waits for a specific port to be ready. If no port is specified, just starts the container without waiting.
+- `proxyRequest(request, port?)`: Proxies an HTTP request to the container. Either port parameter or defaultPort must be specified.
+- `proxyWebSocket(request, port?)`: Proxies a WebSocket connection to the container. Either port parameter or defaultPort must be specified.
+- `shutdownContainer(reason?)`: Stops the container
+- `setState(state)`: Updates the container state
+- `fetch(request)`: Default handler to proxy HTTP requests to the container
+- `renewActivityTimeout()`: Manually renews the container activity timeout (extends container lifetime)
+- `shutdownDueToInactivity()`: Called automatically when the container times out due to inactivity
+
+### Utility Functions
+
+- `loadBalance(binding, instances?)`: Load balances requests across multiple container instances
+- `randomContainerId(max)`: Generates a random container ID for load balancing
+
+
+## Examples
 
 ### Basic HTTP Example
 
@@ -374,54 +458,3 @@ export default {
   }
 };
 ```
-
-## API Reference
-
-### Container Class
-
-The main class that wraps a container-enbled Durable Object to provide container functionality.
-
-#### Properties
-
-- `defaultPort?`: Optional default port to use when communicating with the container. If not set, you must specify port in proxyRequest calls
-- `sleepAfter`: How long to keep the container alive without activity (format: number for seconds, or string like "5m", "30s", "1h")
-- `explicitContainerStart`: If true, container won't start automatically on DO boot (default: false). Set as a class property or via constructor options.
-- `containerConfig`: Configuration for the container's environment, entrypoint, and network access
-- Lifecycle methods: `onBoot`, `onShutdown`, `onStateUpdate`, `onError`
-- `initialState`: Initial state for the container
-
-#### Constructor Options
-
-```typescript
-constructor(ctx: any, env: Env, options?: {
-  defaultPort?: number;           // Override default port
-  sleepAfter?: string | number;   // Override sleep timeout
-  explicitContainerStart?: boolean; // Disable automatic container start (prefer setting as class property)
-  env?: Record<string, string>;   // Environment variables to pass to the container
-  entrypoint?: string[];          // Custom entrypoint to override container default
-  enableInternet?: boolean;       // Whether to enable internet access for the container
-})
-```
-
-#### Methods
-
-##### Lifecycle Methods
-- `onBoot(state?)`: Called when container boots successfully - override to add custom behavior
-- `onShutdown(state?)`: Called when container shuts down - override to add custom behavior
-- `onStateUpdate(state)`: Called when container state is updated - override to add custom behavior
-- `onError(error)`: Called when container encounters an error - override to add custom behavior
-
-##### Container Methods
-- `startAndWaitForPort(port?, maxTries?)`: Starts the container and waits for a specific port to be ready. If no port is specified, just starts the container without waiting.
-- `proxyRequest(request, port?)`: Proxies an HTTP request to the container. Either port parameter or defaultPort must be specified.
-- `proxyWebSocket(request, port?)`: Proxies a WebSocket connection to the container. Either port parameter or defaultPort must be specified.
-- `shutdownContainer(reason?)`: Stops the container
-- `setState(state)`: Updates the container state
-- `fetch(request)`: Default handler to proxy HTTP requests to the container
-- `renewActivityTimeout()`: Manually renews the container activity timeout (extends container lifetime)
-- `shutdownDueToInactivity()`: Called automatically when the container times out due to inactivity
-
-### Utility Functions
-
-- `loadBalance(binding, instances?)`: Load balances requests across multiple container instances
-- `randomContainerId(max)`: Generates a random container ID for load balancing
