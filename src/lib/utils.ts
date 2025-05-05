@@ -26,8 +26,10 @@ export async function loadBalance<T extends Container>(
   // Generate a random ID within the range of instances
   const id = randomContainerId(instances).toString();
   
-  // Get the Durable Object ID for this instance - use idFromName to create a valid ID
-  const objectId = binding.idFromName(`instance-${id}`);
+  // Get the Durable Object ID for this instance - use idFromString method if available, otherwise idFromName
+  const objectId = binding.idFromString 
+    ? binding.idFromString(`instance-${id}`) 
+    : binding.idFromName(`instance-${id}`);
   
   // Return the stub for the selected instance
   return binding.get(objectId);

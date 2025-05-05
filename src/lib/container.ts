@@ -194,6 +194,9 @@ export class Container<Env = unknown> extends (Server as any) {
       throw new Error("No container found in context");
     }
 
+    // Variable to track monitor setup
+    let monitor;
+
     // Start the container if it's not running
     if (!this.ctx.container.running) {
       console.log("Starting container...");
@@ -204,19 +207,19 @@ export class Container<Env = unknown> extends (Server as any) {
         entrypoint: config.entrypoint,
         enableInternet: config.enableInternet,
       });
-    }
-
-    // Set up monitoring to track container status
-    try {
-      console.log("Setting up monitoring...");
-      // Track container status
-      this.ctx.container.monitor().then(() => {
-        this.onShutdown(this.state);
-      }).catch((error: unknown) => {
-        this.onError(error);
-      });
-    } catch (e) {
-      console.warn("Error setting up container monitor:", e);
+      
+      // Set up monitoring only when we start the container
+      try {
+        console.log("Setting up monitoring...");
+        // Track container status
+        monitor = this.ctx.container.monitor().then(() => {
+          this.onShutdown(this.state);
+        }).catch((error: unknown) => {
+          this.onError(error);
+        });
+      } catch (e) {
+        console.warn("Error setting up container monitor:", e);
+      }
     }
 
     // If no port is specified, just start the container without waiting for port readiness
@@ -236,22 +239,30 @@ export class Container<Env = unknown> extends (Server as any) {
     for (let i = 0; i < maxTries; i++) {
       try {
         console.log("make fetch...");
-        const response = await tcpPort.fetch("http://container/");
-        // 599 is a special status code used when the container isn't ready yet
-        if (response.status !== 599) {
-          // Successfully connected, container is ready
-          this.onBoot(this.state);
-          // Initialize activity timeout after successful start
-          await this.renewActivityTimeout();
-          return;
-        }
+        // Use http://ping like in containers-starter-go implementation
+        const response = await tcpPort.fetch("http://ping");
+        
+        // Successfully connected, container is ready
+        this.onBoot(this.state);
+        // Initialize activity timeout after successful start
+        await this.renewActivityTimeout();
+        return;
       } catch (e) {
         console.log("ERROR WHILE FETCHING", e);
-        // Ignore errors and try again
+        
+        // Check for specific error messages that indicate we should keep retrying
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        if (errorMessage.includes("listening") || 
+            errorMessage.includes("there is no container instance")) {
+          console.log("Container not yet ready, retrying...");
+        } else {
+          // Log other errors but continue with retries
+          console.error("Container connection error:", errorMessage);
+        }
       }
 
-      // Wait a bit before trying again
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Wait a bit before trying again (300ms like in containers-starter-go)
+      await new Promise(resolve => setTimeout(resolve, 300));
     }
 
     throw new Error(`Failed to verify container is running after ${maxTries} attempts`);

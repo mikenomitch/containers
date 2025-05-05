@@ -141,40 +141,51 @@ var Container = class extends import_partyserver.Server {
     if (!this.ctx.container) {
       throw new Error("No container found in context");
     }
+    let monitor;
     if (!this.ctx.container.running) {
+      console.log("Starting container...");
       const config = this.constructor.containerConfig;
       this.ctx.container.start({
         env: config.env,
         entrypoint: config.entrypoint,
         enableInternet: config.enableInternet
       });
-    }
-    try {
-      this.ctx.container.monitor().then(() => {
-        this.onShutdown(this.state);
-      }).catch((error) => {
-        this.onError(error);
-      });
-    } catch (e) {
-      console.warn("Error setting up container monitor:", e);
+      try {
+        console.log("Setting up monitoring...");
+        monitor = this.ctx.container.monitor().then(() => {
+          this.onShutdown(this.state);
+        }).catch((error) => {
+          this.onError(error);
+        });
+      } catch (e) {
+        console.warn("Error setting up container monitor:", e);
+      }
     }
     if (port === void 0) {
+      console.log("No port...");
       this.onBoot(this.state);
       await this.renewActivityTimeout();
       return;
     }
+    console.log("Setting up monitoring...");
     const tcpPort = this.ctx.container.getTcpPort(port);
     for (let i = 0; i < maxTries; i++) {
       try {
-        const response = await tcpPort.fetch("http://container/");
-        if (response.status !== 599) {
-          this.onBoot(this.state);
-          await this.renewActivityTimeout();
-          return;
-        }
+        console.log("make fetch...");
+        const response = await tcpPort.fetch("http://ping");
+        this.onBoot(this.state);
+        await this.renewActivityTimeout();
+        return;
       } catch (e) {
+        console.log("ERROR WHILE FETCHING", e);
+        const errorMessage = e instanceof Error ? e.message : String(e);
+        if (errorMessage.includes("listening") || errorMessage.includes("there is no container instance")) {
+          console.log("Container not yet ready, retrying...");
+        } else {
+          console.error("Container connection error:", errorMessage);
+        }
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 300));
     }
     throw new Error(`Failed to verify container is running after ${maxTries} attempts`);
   }
@@ -486,7 +497,7 @@ function randomContainerId(max) {
 }
 async function loadBalance(binding, instances = 3) {
   const id = randomContainerId(instances).toString();
-  const objectId = binding.idFromString(id);
+  const objectId = binding.idFromString ? binding.idFromString(`instance-${id}`) : binding.idFromName(`instance-${id}`);
   return binding.get(objectId);
 }
 // Annotate the CommonJS export names for ESM import in node:
