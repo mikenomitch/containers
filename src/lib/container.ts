@@ -196,6 +196,7 @@ export class Container<Env = unknown> extends (Server as any) {
 
     // Start the container if it's not running
     if (!this.ctx.container.running) {
+      console.log("Starting container...");
       // Use the static class configuration
       const config = (this.constructor as typeof Container).containerConfig;
       this.ctx.container.start({
@@ -207,6 +208,7 @@ export class Container<Env = unknown> extends (Server as any) {
 
     // Set up monitoring to track container status
     try {
+      console.log("Setting up monitoring...");
       // Track container status
       this.ctx.container.monitor().then(() => {
         this.onShutdown(this.state);
@@ -219,6 +221,7 @@ export class Container<Env = unknown> extends (Server as any) {
 
     // If no port is specified, just start the container without waiting for port readiness
     if (port === undefined) {
+      console.log("No port...");
       // Successfully started the container (without port check)
       this.onBoot(this.state);
       // Initialize activity timeout after successful start
@@ -226,11 +229,13 @@ export class Container<Env = unknown> extends (Server as any) {
       return;
     }
 
+    console.log("Setting up monitoring...");
     const tcpPort = this.ctx.container.getTcpPort(port);
 
     // Try to connect to the port multiple times
     for (let i = 0; i < maxTries; i++) {
       try {
+        console.log("make fetch...");
         const response = await tcpPort.fetch("http://container/");
         // 599 is a special status code used when the container isn't ready yet
         if (response.status !== 599) {
@@ -241,6 +246,7 @@ export class Container<Env = unknown> extends (Server as any) {
           return;
         }
       } catch (e) {
+        console.log("ERROR WHILE FETCHING", e);
         // Ignore errors and try again
       }
 
