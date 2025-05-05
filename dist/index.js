@@ -138,6 +138,8 @@ var Container = class extends import_partyserver.Server {
    * Based on containers-starter-go implementation
    */
   async startAndWaitForPort(port, maxTries = 10) {
+    console.log("TRYING FOR PORT - ", port);
+
     if (!this.ctx.container) {
       throw new Error("No container found in context");
     }
@@ -171,8 +173,10 @@ var Container = class extends import_partyserver.Server {
     const tcpPort = this.ctx.container.getTcpPort(port);
     for (let i = 0; i < maxTries; i++) {
       try {
-        console.log("make fetch...");
+        console.log("make the fetch...");
         const response = await tcpPort.fetch("http://ping");
+        const responseBody = await response.text();
+        console.log("Response body:", responseBody);
         this.onBoot(this.state);
         await this.renewActivityTimeout();
         return;

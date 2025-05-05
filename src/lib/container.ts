@@ -1,8 +1,10 @@
 import { Server, type Connection, type ConnectionContext, type WebSocket } from "partyserver";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { nanoid } from "nanoid";
 import type {
   ContainerOptions,
-  ContainerState
+  ContainerState,
+  Schedule
 } from "../types";
 
 const STATE_ROW_ID = "container_state_row_id";
@@ -167,6 +169,29 @@ export class Container<Env = unknown> extends (Server as any) {
       )
     `;
 
+    // Create schedules table if it doesn't exist
+    this.sql`
+      CREATE TABLE IF NOT EXISTS container_schedules (
+        id TEXT PRIMARY KEY NOT NULL DEFAULT (randomblob(9)),
+        callback TEXT NOT NULL,
+        payload TEXT,
+        type TEXT NOT NULL CHECK(type IN ('scheduled', 'delayed')),
+        time INTEGER NOT NULL,
+        delayInSeconds INTEGER,
+        created_at INTEGER DEFAULT (unixepoch())
+      )
+    `;
+
+    // Process any pending schedules and set up next alarm
+    this.ctx.blockConcurrencyWhile(async () => {
+      await this.#tryCatch(async () => {
+        // Execute any pending schedules
+        await this.alarm();
+        
+        // Schedule next alarms
+        await this.#scheduleNextAlarm();
+      });
+    });
 
     // Start the container automatically if needed
     this.ctx.blockConcurrencyWhile(async () => {
@@ -420,45 +445,53 @@ export class Container<Env = unknown> extends (Server as any) {
   }
 
   /**
-   * Schedule a container shutdown after the specified sleep timeout
+   * Parse a time expression into seconds
    * @private
+   * @param timeExpression Time expression (number or string like "5m", "30s", "1h")
+   * @returns Number of seconds
    */
-  async #scheduleSleepTimeout(): Promise<void> {
-    // Convert the sleepAfter value to seconds
-    let timeoutInSeconds: number;
-
-    if (typeof this.sleepAfter === 'number') {
+  #parseTimeExpression(timeExpression: string | number): number {
+    if (typeof timeExpression === 'number') {
       // If it's already a number, assume it's in seconds
-      timeoutInSeconds = this.sleepAfter;
-    } else if (typeof this.sleepAfter === 'string') {
+      return timeExpression;
+    } else if (typeof timeExpression === 'string') {
       // Parse time expressions like "5m", "30s", "1h"
-      const match = this.sleepAfter.match(/^(\d+)([smh])$/);
+      const match = timeExpression.match(/^(\d+)([smh])$/);
       if (!match) {
         // Default to 5 minutes if format is invalid
-        timeoutInSeconds = 300;
+        return 300;
       } else {
         const value = parseInt(match[1]);
         const unit = match[2];
 
         // Convert to seconds based on unit
         switch (unit) {
-          case 's': timeoutInSeconds = value; break;
-          case 'm': timeoutInSeconds = value * 60; break;
-          case 'h': timeoutInSeconds = value * 60 * 60; break;
-          default: timeoutInSeconds = 300;
+          case 's': return value;
+          case 'm': return value * 60;
+          case 'h': return value * 60 * 60;
+          default: return 300;
         }
       }
     } else {
-      // Default to 5 minutes
-      timeoutInSeconds = 300;
+      // Default to 5 minutes for invalid inputs
+      return 300;
     }
+  }
+
+  /**
+   * Schedule a container shutdown after the specified sleep timeout
+   * @private
+   */
+  async #scheduleSleepTimeout(): Promise<void> {
+    // Convert the sleepAfter value to seconds
+    const timeoutInSeconds = this.#parseTimeExpression(this.sleepAfter);
 
     // Cancel any existing timeout
     await this.#cancelSleepTimeout();
 
     // Schedule the container shutdown
-    const { taskId } = await this.schedule(timeoutInSeconds, "shutdownDueToInactivity");
-    this.#sleepTimeoutTaskId = taskId;
+    const { id } = await this.schedule(timeoutInSeconds, "shutdownDueToInactivity");
+    this.#sleepTimeoutTaskId = id;
   }
 
   /**
@@ -474,6 +507,293 @@ export class Container<Env = unknown> extends (Server as any) {
       }
       this.#sleepTimeoutTaskId = null;
     }
+  }
+  
+  /**
+   * Schedule a task to be executed in the future
+   * @template T Type of the payload data
+   * @param when When to execute the task (Date object or number of seconds delay)
+   * @param callback Name of the method to call
+   * @param payload Data to pass to the callback
+   * @returns Schedule object representing the scheduled task
+   */
+  async schedule<T = string>(
+    when: Date | number,
+    callback: keyof this,
+    payload?: T
+  ): Promise<Schedule<T>> {
+    const id = nanoid(9);
+    
+    // Ensure the callback is a string (method name)
+    if (typeof callback !== "string") {
+      throw new Error("Callback must be a string (method name)");
+    }
+    
+    // Ensure the method exists
+    if (typeof this[callback] !== "function") {
+      throw new Error(`this.${callback} is not a function`);
+    }
+    
+    // Schedule based on the type of 'when' parameter
+    if (when instanceof Date) {
+      // Schedule for a specific time
+      const timestamp = Math.floor(when.getTime() / 1000);
+      
+      this.sql`
+        INSERT OR REPLACE INTO container_schedules (id, callback, payload, type, time)
+        VALUES (${id}, ${callback}, ${JSON.stringify(payload)}, 'scheduled', ${timestamp})
+      `;
+      
+      await this.#scheduleNextAlarm();
+      
+      return {
+        id,
+        callback: callback,
+        payload: payload as T,
+        time: timestamp,
+        type: "scheduled",
+      };
+    } else if (typeof when === "number") {
+      // Schedule for a delay in seconds
+      const time = Math.floor(Date.now() / 1000 + when);
+      
+      this.sql`
+        INSERT OR REPLACE INTO container_schedules (id, callback, payload, type, delayInSeconds, time)
+        VALUES (${id}, ${callback}, ${JSON.stringify(payload)}, 'delayed', ${when}, ${time})
+      `;
+      
+      await this.#scheduleNextAlarm();
+      
+      return {
+        id,
+        callback: callback,
+        payload: payload as T,
+        delayInSeconds: when,
+        time,
+        type: "delayed",
+      };
+    } else {
+      throw new Error("Invalid schedule type. 'when' must be a Date or number of seconds");
+    }
+  }
+  
+  /**
+   * Schedule the next alarm based on upcoming tasks
+   * @private
+   */
+  async #scheduleNextAlarm(): Promise<void> {
+    // Find the next schedule that needs to be executed
+    const result = this.sql`
+      SELECT time FROM container_schedules 
+      WHERE time > ${Math.floor(Date.now() / 1000)}
+      ORDER BY time ASC 
+      LIMIT 1
+    `;
+    
+    if (result.length > 0 && "time" in result[0]) {
+      const nextTime = (result[0].time as number) * 1000;
+      await this.ctx.storage.setAlarm(nextTime);
+    }
+  }
+  
+  /**
+   * Cancel a scheduled task
+   * @param id ID of the task to cancel
+   * @returns true if the task was cancelled, false if not found
+   */
+  async unschedule(id: string): Promise<boolean> {
+    // Delete the schedule from the database
+    this.sql`DELETE FROM container_schedules WHERE id = ${id}`;
+    
+    // Reschedule the next alarm (if any remain)
+    await this.#scheduleNextAlarm();
+    
+    return true;
+  }
+  
+  /**
+   * Get a scheduled task by ID
+   * @template T Type of the payload data
+   * @param id ID of the scheduled task
+   * @returns The Schedule object or undefined if not found
+   */
+  async getSchedule<T = string>(id: string): Promise<Schedule<T> | undefined> {
+    const result = this.sql<{
+      id: string;
+      callback: string;
+      payload: string;
+      type: 'scheduled' | 'delayed';
+      time: number;
+      delayInSeconds?: number;
+    }>`
+      SELECT * FROM container_schedules WHERE id = ${id} LIMIT 1
+    `;
+    
+    if (!result || result.length === 0) {
+      return undefined;
+    }
+    
+    const schedule = result[0];
+    let payload: T;
+    
+    try {
+      payload = JSON.parse(schedule.payload) as T;
+    } catch (e) {
+      console.error(`Error parsing payload for schedule ${id}:`, e);
+      payload = undefined as unknown as T;
+    }
+    
+    if (schedule.type === 'delayed') {
+      return {
+        id: schedule.id,
+        callback: schedule.callback,
+        payload,
+        type: 'delayed',
+        time: schedule.time,
+        delayInSeconds: schedule.delayInSeconds!
+      };
+    } else {
+      return {
+        id: schedule.id,
+        callback: schedule.callback,
+        payload,
+        type: 'scheduled',
+        time: schedule.time
+      };
+    }
+  }
+  
+  /**
+   * Get scheduled tasks matching the given criteria
+   * @template T Type of the payload data
+   * @param criteria Criteria to filter schedules
+   * @returns Array of matching Schedule objects
+   */
+  getSchedules<T = string>(
+    criteria: {
+      id?: string;
+      type?: 'scheduled' | 'delayed';
+      timeRange?: { start?: Date; end?: Date };
+    } = {}
+  ): Schedule<T>[] {
+    // Build the query dynamically based on criteria
+    let query = "SELECT * FROM container_schedules WHERE 1=1";
+    const params: (string | number)[] = [];
+    
+    // Add filters for each criterion
+    if (criteria.id) {
+      query += " AND id = ?";
+      params.push(criteria.id);
+    }
+    
+    if (criteria.type) {
+      query += " AND type = ?";
+      params.push(criteria.type);
+    }
+    
+    if (criteria.timeRange) {
+      if (criteria.timeRange.start) {
+        query += " AND time >= ?";
+        params.push(Math.floor(criteria.timeRange.start.getTime() / 1000));
+      }
+      
+      if (criteria.timeRange.end) {
+        query += " AND time <= ?";
+        params.push(Math.floor(criteria.timeRange.end.getTime() / 1000));
+      }
+    }
+    
+    // Execute the query
+    const result = this.ctx.storage.sql.exec(query, ...params);
+    
+    // Transform results to Schedule objects
+    return [...result].map(row => {
+      let payload: T;
+      try {
+        payload = JSON.parse(row.payload as string) as T;
+      } catch (e) {
+        console.error(`Error parsing payload for schedule ${row.id}:`, e);
+        payload = undefined as unknown as T;
+      }
+      
+      if (row.type === 'delayed') {
+        return {
+          id: row.id as string,
+          callback: row.callback as string,
+          payload,
+          type: 'delayed',
+          time: row.time as number,
+          delayInSeconds: row.delayInSeconds as number
+        };
+      } else {
+        return {
+          id: row.id as string,
+          callback: row.callback as string,
+          payload,
+          type: 'scheduled',
+          time: row.time as number
+        };
+      }
+    });
+  }
+  
+  /**
+   * Method called when an alarm fires
+   * Executes any scheduled tasks that are due
+   */
+  async alarm(): Promise<void> {
+    return this.#tryCatch(async () => {
+      const now = Math.floor(Date.now() / 1000);
+      
+      // Get all schedules that should be executed now
+      const result = this.sql<{
+        id: string;
+        callback: string;
+        payload: string;
+        type: 'scheduled' | 'delayed';
+        time: number;
+      }>`
+        SELECT * FROM container_schedules WHERE time <= ${now}
+      `;
+      
+      // Process each due schedule
+      for (const row of result) {
+        const callback = this[row.callback as keyof this];
+        
+        if (!callback || typeof callback !== 'function') {
+          console.error(`Callback ${row.callback} not found or is not a function`);
+          continue;
+        }
+        
+        // Create a schedule object for context
+        const schedule = this.getSchedule(row.id);
+        
+        try {
+          // Parse the payload and execute the callback
+          const payload = row.payload ? JSON.parse(row.payload) : undefined;
+          
+          // Use context storage to execute the callback with proper 'this' binding
+          await containerContext.run(
+            { 
+              container: this, 
+              connection: undefined, 
+              request: undefined 
+            },
+            async () => {
+              await callback.call(this, payload, await schedule);
+            }
+          );
+        } catch (e) {
+          console.error(`Error executing scheduled callback "${row.callback}":`, e);
+        }
+        
+        // Delete the schedule after execution (one-time schedules)
+        this.sql`DELETE FROM container_schedules WHERE id = ${row.id}`;
+      }
+      
+      // Schedule the next alarm
+      await this.#scheduleNextAlarm();
+    });
   }
 
   /**
