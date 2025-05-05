@@ -38,6 +38,38 @@ module.exports = __toCommonJS(index_exports);
 // src/lib/container.ts
 var import_partyserver = require("partyserver");
 var import_node_async_hooks = require("async_hooks");
+
+// node_modules/nanoid/index.js
+var import_node_crypto = require("crypto");
+
+// node_modules/nanoid/url-alphabet/index.js
+var urlAlphabet = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict";
+
+// node_modules/nanoid/index.js
+var POOL_SIZE_MULTIPLIER = 128;
+var pool;
+var poolOffset;
+function fillPool(bytes) {
+  if (!pool || pool.length < bytes) {
+    pool = Buffer.allocUnsafe(bytes * POOL_SIZE_MULTIPLIER);
+    import_node_crypto.webcrypto.getRandomValues(pool);
+    poolOffset = 0;
+  } else if (poolOffset + bytes > pool.length) {
+    import_node_crypto.webcrypto.getRandomValues(pool);
+    poolOffset = 0;
+  }
+  poolOffset += bytes;
+}
+function nanoid(size = 21) {
+  fillPool(size |= 0);
+  let id = "";
+  for (let i = poolOffset - size; i < poolOffset; i++) {
+    id += urlAlphabet[pool[i] & 63];
+  }
+  return id;
+}
+
+// src/lib/container.ts
 var STATE_ROW_ID = "container_state_row_id";
 var STATE_CHANGED_ID = "container_state_changed_id";
 var DEFAULT_STATE = {};
@@ -53,7 +85,7 @@ function getCurrentContainer() {
   }
   return store;
 }
-var _sleepTimeoutTaskId, _state, _Container_instances, setStateInternal_fn, tryCatch_fn, scheduleSleepTimeout_fn, cancelSleepTimeout_fn;
+var _sleepTimeoutTaskId, _state, _Container_instances, setStateInternal_fn, tryCatch_fn, parseTimeExpression_fn, scheduleSleepTimeout_fn, cancelSleepTimeout_fn, scheduleNextAlarm_fn;
 var Container = class extends import_partyserver.Server {
   constructor(ctx, env, options) {
     super(ctx, env);
@@ -81,6 +113,23 @@ var Container = class extends import_partyserver.Server {
         state TEXT
       )
     `;
+    this.sql`
+      CREATE TABLE IF NOT EXISTS container_schedules (
+        id TEXT PRIMARY KEY NOT NULL DEFAULT (randomblob(9)),
+        callback TEXT NOT NULL,
+        payload TEXT,
+        type TEXT NOT NULL CHECK(type IN ('scheduled', 'delayed')),
+        time INTEGER NOT NULL,
+        delayInSeconds INTEGER,
+        created_at INTEGER DEFAULT (unixepoch())
+      )
+    `;
+    this.ctx.blockConcurrencyWhile(async () => {
+      await __privateMethod(this, _Container_instances, tryCatch_fn).call(this, async () => {
+        await this.alarm();
+        await __privateMethod(this, _Container_instances, scheduleNextAlarm_fn).call(this);
+      });
+    });
     this.ctx.blockConcurrencyWhile(async () => {
       if (this.shouldAutoStart()) {
         await this.startAndWaitForPort(this.defaultPort);
@@ -138,8 +187,6 @@ var Container = class extends import_partyserver.Server {
    * Based on containers-starter-go implementation
    */
   async startAndWaitForPort(port, maxTries = 10) {
-    console.log("TRYING FOR PORT - ", port);
-
     if (!this.ctx.container) {
       throw new Error("No container found in context");
     }
@@ -173,10 +220,8 @@ var Container = class extends import_partyserver.Server {
     const tcpPort = this.ctx.container.getTcpPort(port);
     for (let i = 0; i < maxTries; i++) {
       try {
-        console.log("make the fetch...");
+        console.log("make fetch...");
         const response = await tcpPort.fetch("http://ping");
-        const responseBody = await response.text();
-        console.log("Response body:", responseBody);
         this.onBoot(this.state);
         await this.renewActivityTimeout();
         return;
@@ -272,6 +317,198 @@ var Container = class extends import_partyserver.Server {
   onError(error) {
     console.error("Container error:", error);
     throw error;
+  }
+  /**
+   * Schedule a task to be executed in the future
+   * @template T Type of the payload data
+   * @param when When to execute the task (Date object or number of seconds delay)
+   * @param callback Name of the method to call
+   * @param payload Data to pass to the callback
+   * @returns Schedule object representing the scheduled task
+   */
+  async schedule(when, callback, payload) {
+    const id = nanoid(9);
+    if (typeof callback !== "string") {
+      throw new Error("Callback must be a string (method name)");
+    }
+    if (typeof this[callback] !== "function") {
+      throw new Error(`this.${callback} is not a function`);
+    }
+    if (when instanceof Date) {
+      const timestamp = Math.floor(when.getTime() / 1e3);
+      this.sql`
+        INSERT OR REPLACE INTO container_schedules (id, callback, payload, type, time)
+        VALUES (${id}, ${callback}, ${JSON.stringify(payload)}, 'scheduled', ${timestamp})
+      `;
+      await __privateMethod(this, _Container_instances, scheduleNextAlarm_fn).call(this);
+      return {
+        id,
+        callback,
+        payload,
+        time: timestamp,
+        type: "scheduled"
+      };
+    } else if (typeof when === "number") {
+      const time = Math.floor(Date.now() / 1e3 + when);
+      this.sql`
+        INSERT OR REPLACE INTO container_schedules (id, callback, payload, type, delayInSeconds, time)
+        VALUES (${id}, ${callback}, ${JSON.stringify(payload)}, 'delayed', ${when}, ${time})
+      `;
+      await __privateMethod(this, _Container_instances, scheduleNextAlarm_fn).call(this);
+      return {
+        id,
+        callback,
+        payload,
+        delayInSeconds: when,
+        time,
+        type: "delayed"
+      };
+    } else {
+      throw new Error("Invalid schedule type. 'when' must be a Date or number of seconds");
+    }
+  }
+  /**
+   * Cancel a scheduled task
+   * @param id ID of the task to cancel
+   * @returns true if the task was cancelled, false if not found
+   */
+  async unschedule(id) {
+    this.sql`DELETE FROM container_schedules WHERE id = ${id}`;
+    await __privateMethod(this, _Container_instances, scheduleNextAlarm_fn).call(this);
+    return true;
+  }
+  /**
+   * Get a scheduled task by ID
+   * @template T Type of the payload data
+   * @param id ID of the scheduled task
+   * @returns The Schedule object or undefined if not found
+   */
+  async getSchedule(id) {
+    const result = this.sql`
+      SELECT * FROM container_schedules WHERE id = ${id} LIMIT 1
+    `;
+    if (!result || result.length === 0) {
+      return void 0;
+    }
+    const schedule = result[0];
+    let payload;
+    try {
+      payload = JSON.parse(schedule.payload);
+    } catch (e) {
+      console.error(`Error parsing payload for schedule ${id}:`, e);
+      payload = void 0;
+    }
+    if (schedule.type === "delayed") {
+      return {
+        id: schedule.id,
+        callback: schedule.callback,
+        payload,
+        type: "delayed",
+        time: schedule.time,
+        delayInSeconds: schedule.delayInSeconds
+      };
+    } else {
+      return {
+        id: schedule.id,
+        callback: schedule.callback,
+        payload,
+        type: "scheduled",
+        time: schedule.time
+      };
+    }
+  }
+  /**
+   * Get scheduled tasks matching the given criteria
+   * @template T Type of the payload data
+   * @param criteria Criteria to filter schedules
+   * @returns Array of matching Schedule objects
+   */
+  getSchedules(criteria = {}) {
+    let query = "SELECT * FROM container_schedules WHERE 1=1";
+    const params = [];
+    if (criteria.id) {
+      query += " AND id = ?";
+      params.push(criteria.id);
+    }
+    if (criteria.type) {
+      query += " AND type = ?";
+      params.push(criteria.type);
+    }
+    if (criteria.timeRange) {
+      if (criteria.timeRange.start) {
+        query += " AND time >= ?";
+        params.push(Math.floor(criteria.timeRange.start.getTime() / 1e3));
+      }
+      if (criteria.timeRange.end) {
+        query += " AND time <= ?";
+        params.push(Math.floor(criteria.timeRange.end.getTime() / 1e3));
+      }
+    }
+    const result = this.ctx.storage.sql.exec(query, ...params);
+    return [...result].map((row) => {
+      let payload;
+      try {
+        payload = JSON.parse(row.payload);
+      } catch (e) {
+        console.error(`Error parsing payload for schedule ${row.id}:`, e);
+        payload = void 0;
+      }
+      if (row.type === "delayed") {
+        return {
+          id: row.id,
+          callback: row.callback,
+          payload,
+          type: "delayed",
+          time: row.time,
+          delayInSeconds: row.delayInSeconds
+        };
+      } else {
+        return {
+          id: row.id,
+          callback: row.callback,
+          payload,
+          type: "scheduled",
+          time: row.time
+        };
+      }
+    });
+  }
+  /**
+   * Method called when an alarm fires
+   * Executes any scheduled tasks that are due
+   */
+  async alarm() {
+    return __privateMethod(this, _Container_instances, tryCatch_fn).call(this, async () => {
+      const now = Math.floor(Date.now() / 1e3);
+      const result = this.sql`
+        SELECT * FROM container_schedules WHERE time <= ${now}
+      `;
+      for (const row of result) {
+        const callback = this[row.callback];
+        if (!callback || typeof callback !== "function") {
+          console.error(`Callback ${row.callback} not found or is not a function`);
+          continue;
+        }
+        const schedule = this.getSchedule(row.id);
+        try {
+          const payload = row.payload ? JSON.parse(row.payload) : void 0;
+          await containerContext.run(
+            {
+              container: this,
+              connection: void 0,
+              request: void 0
+            },
+            async () => {
+              await callback.call(this, payload, await schedule);
+            }
+          );
+        } catch (e) {
+          console.error(`Error executing scheduled callback "${row.callback}":`, e);
+        }
+        this.sql`DELETE FROM container_schedules WHERE id = ${row.id}`;
+      }
+      await __privateMethod(this, _Container_instances, scheduleNextAlarm_fn).call(this);
+    });
   }
   /**
    * Renew the container's activity timeout
@@ -438,37 +675,42 @@ tryCatch_fn = async function(fn) {
     throw this.onError(e);
   }
 };
-scheduleSleepTimeout_fn = async function() {
-  let timeoutInSeconds;
-  if (typeof this.sleepAfter === "number") {
-    timeoutInSeconds = this.sleepAfter;
-  } else if (typeof this.sleepAfter === "string") {
-    const match = this.sleepAfter.match(/^(\d+)([smh])$/);
+/**
+ * Parse a time expression into seconds
+ * @private
+ * @param timeExpression Time expression (number or string like "5m", "30s", "1h")
+ * @returns Number of seconds
+ */
+parseTimeExpression_fn = function(timeExpression) {
+  if (typeof timeExpression === "number") {
+    return timeExpression;
+  } else if (typeof timeExpression === "string") {
+    const match = timeExpression.match(/^(\d+)([smh])$/);
     if (!match) {
-      timeoutInSeconds = 300;
+      return 300;
     } else {
       const value = parseInt(match[1]);
       const unit = match[2];
       switch (unit) {
         case "s":
-          timeoutInSeconds = value;
-          break;
+          return value;
         case "m":
-          timeoutInSeconds = value * 60;
-          break;
+          return value * 60;
         case "h":
-          timeoutInSeconds = value * 60 * 60;
-          break;
+          return value * 60 * 60;
         default:
-          timeoutInSeconds = 300;
+          return 300;
       }
     }
   } else {
-    timeoutInSeconds = 300;
+    return 300;
   }
+};
+scheduleSleepTimeout_fn = async function() {
+  const timeoutInSeconds = __privateMethod(this, _Container_instances, parseTimeExpression_fn).call(this, this.sleepAfter);
   await __privateMethod(this, _Container_instances, cancelSleepTimeout_fn).call(this);
-  const { taskId } = await this.schedule(timeoutInSeconds, "shutdownDueToInactivity");
-  __privateSet(this, _sleepTimeoutTaskId, taskId);
+  const { id } = await this.schedule(timeoutInSeconds, "shutdownDueToInactivity");
+  __privateSet(this, _sleepTimeoutTaskId, id);
 };
 cancelSleepTimeout_fn = async function() {
   if (__privateGet(this, _sleepTimeoutTaskId)) {
@@ -477,6 +719,18 @@ cancelSleepTimeout_fn = async function() {
     } catch (e) {
     }
     __privateSet(this, _sleepTimeoutTaskId, null);
+  }
+};
+scheduleNextAlarm_fn = async function() {
+  const result = this.sql`
+      SELECT time FROM container_schedules 
+      WHERE time > ${Math.floor(Date.now() / 1e3)}
+      ORDER BY time ASC 
+      LIMIT 1
+    `;
+  if (result.length > 0 && "time" in result[0]) {
+    const nextTime = result[0].time * 1e3;
+    await this.ctx.storage.setAlarm(nextTime);
   }
 };
 /**
@@ -501,7 +755,7 @@ function randomContainerId(max) {
 }
 async function loadBalance(binding, instances = 3) {
   const id = randomContainerId(instances).toString();
-  const objectId = binding.idFromString ? binding.idFromString(`instance-${id}`) : binding.idFromName(`instance-${id}`);
+  const objectId = binding.idFromName(`instance-${id}`);
   return binding.get(objectId);
 }
 // Annotate the CommonJS export names for ESM import in node:

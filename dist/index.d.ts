@@ -49,6 +49,30 @@ interface ContainerContext {
  * Function to handle container events
  */
 type ContainerEventHandler = (state?: ContainerState) => void | Promise<void>;
+/**
+ * Represents a scheduled task within a Container
+ * @template T Type of the payload data
+ */
+type Schedule<T = string> = {
+    /** Unique identifier for the schedule */
+    id: string;
+    /** Name of the method to be called */
+    callback: string;
+    /** Data to be passed to the callback */
+    payload: T;
+} & ({
+    /** Type of schedule for one-time execution at a specific time */
+    type: "scheduled";
+    /** Timestamp when the task should execute */
+    time: number;
+} | {
+    /** Type of schedule for delayed execution */
+    type: "delayed";
+    /** Timestamp when the task should execute */
+    time: number;
+    /** Number of seconds to delay execution */
+    delayInSeconds: number;
+});
 
 /**
  * Helper function to get the current container context
@@ -137,6 +161,47 @@ declare class Container<Env = unknown> extends Container_base {
      * Override this method in subclasses to handle container errors
      */
     onError(error: unknown): any;
+    /**
+     * Schedule a task to be executed in the future
+     * @template T Type of the payload data
+     * @param when When to execute the task (Date object or number of seconds delay)
+     * @param callback Name of the method to call
+     * @param payload Data to pass to the callback
+     * @returns Schedule object representing the scheduled task
+     */
+    schedule<T = string>(when: Date | number, callback: keyof this, payload?: T): Promise<Schedule<T>>;
+    /**
+     * Cancel a scheduled task
+     * @param id ID of the task to cancel
+     * @returns true if the task was cancelled, false if not found
+     */
+    unschedule(id: string): Promise<boolean>;
+    /**
+     * Get a scheduled task by ID
+     * @template T Type of the payload data
+     * @param id ID of the scheduled task
+     * @returns The Schedule object or undefined if not found
+     */
+    getSchedule<T = string>(id: string): Promise<Schedule<T> | undefined>;
+    /**
+     * Get scheduled tasks matching the given criteria
+     * @template T Type of the payload data
+     * @param criteria Criteria to filter schedules
+     * @returns Array of matching Schedule objects
+     */
+    getSchedules<T = string>(criteria?: {
+        id?: string;
+        type?: 'scheduled' | 'delayed';
+        timeRange?: {
+            start?: Date;
+            end?: Date;
+        };
+    }): Schedule<T>[];
+    /**
+     * Method called when an alarm fires
+     * Executes any scheduled tasks that are due
+     */
+    alarm(): Promise<void>;
     /**
      * Renew the container's activity timeout
      * Call this method whenever there is activity on the container
