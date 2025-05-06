@@ -56,28 +56,19 @@ export class Container<Env = unknown> extends (Server as any) {
   explicitContainerStart = false;
 
   /**
-   * Default container configuration
-   * Configure at class level by overriding in your subclass
+   * Container configuration properties
+   * Set these properties directly in your container instance
    */
-  static containerConfig: {
-    env?: Record<string, string>;
-    entrypoint?: string[];
-    enableInternet?: boolean;
-  } = {
-    env: {},
-    enableInternet: true
-  };
+  env: Record<string, string> = {};
+  entrypoint?: string[];
+  enableInternet: boolean = true;
 
   // State management removed
 
   // State getter removed
 
-  /**
-   * Container configuration options
-   */
-  static options = {
-    hibernate: true, // default to hibernate when idle
-  };
+  // Options like hibernate are now controlled via instance properties
+  // For example, sleepAfter controls hibernation timing
 
   /**
    * Execute SQL queries against the Container's database
@@ -169,10 +160,10 @@ export class Container<Env = unknown> extends (Server as any) {
    * - Initialize a container that doesn't expose ports
    * - Perform custom port availability checks separately
    *
-   * The method applies the static containerConfig from your Container subclass, including:
-   * - Environment variables (env)
-   * - Custom entrypoint commands (entrypoint)
-   * - Internet access settings (enableInternet)
+   * The method applies the container configuration from your instance properties, including:
+   * - Environment variables (this.env)
+   * - Custom entrypoint commands (this.entrypoint)
+   * - Internet access settings (this.enableInternet)
    *
    * It also sets up monitoring to track container lifecycle events and automatically
    * calls the onShutdown handler when the container terminates.
@@ -198,9 +189,6 @@ export class Container<Env = unknown> extends (Server as any) {
 
     // Start the container if it's not running
     if (!this.ctx.container.running) {
-      // Use the static class configuration
-      const config = (this.constructor as typeof Container).containerConfig;
-
       // Try to start the container, with retries
       let containerStarted = false;
       let lastError = null;
@@ -208,11 +196,18 @@ export class Container<Env = unknown> extends (Server as any) {
       for (let i = 0; i < maxTries && !containerStarted; i++) {
         try {
           console.log(`Starting container (attempt ${i + 1}/${maxTries})`);
-          this.ctx.container.start({
-            env: config.env,
-            entrypoint: config.entrypoint,
-            enableInternet: config.enableInternet,
-          });
+          // Only include properties that are defined
+          const startConfig: {
+            env?: Record<string, string>;
+            entrypoint?: string[];
+            enableInternet?: boolean;
+          } = {};
+
+          if (Object.keys(this.env).length > 0) startConfig.env = this.env;
+          if (this.entrypoint) startConfig.entrypoint = this.entrypoint;
+          if (this.enableInternet !== undefined) startConfig.enableInternet = this.enableInternet;
+
+          this.ctx.container.start(startConfig);
 
           // Set up monitoring only when we start the container
           try {

@@ -7,33 +7,35 @@ export class ConfiguredContainer extends Container {
   // Default port for the container
   defaultPort = 9000;
 
-  // Override the default container configuration at class level
-  static override containerConfig = {
-    // Environment variables to pass to the container
-    env: {
-      NODE_ENV: 'production',
-      LOG_LEVEL: 'info',
-      APP_PORT: '9000',
-      API_URL: 'https://api.example.com'
-    },
-
-    // Custom entrypoint to run in the container
-    entrypoint: ['node', 'server.js', '--config', 'production.json'],
-
-    // Enable internet access for the container
-    enableInternet: true
+  // Environment variables to pass to the container
+  env = {
+    NODE_ENV: 'production',
+    LOG_LEVEL: 'info',
+    APP_PORT: '9000',
+    API_URL: 'https://api.example.com'
   };
 
+  // Custom entrypoint to run in the container
+  entrypoint = ['node', 'server.js', '--config', 'production.json'];
+
+  // Enable internet access for the container
+  enableInternet = true;
+
   constructor(ctx: any, env: any) {
-    // Container configuration should be set at class level using static containerConfig
+    // Container configuration is set via instance properties
     super(ctx, env);
     
-    // No longer supports modifying containerConfig at instance level
+    // You can also modify config properties here if needed
+    // this.env.ADDITIONAL_VAR = 'some value';
   }
 
   // Lifecycle method called when container boots
   override onBoot(): void {
-    const config = (this.constructor as typeof Container).containerConfig;
+    const config = {
+      env: this.env,
+      entrypoint: this.entrypoint,
+      enableInternet: this.enableInternet
+    };
     console.log('Container booted with config:', config);
   }
 
@@ -43,7 +45,11 @@ export class ConfiguredContainer extends Container {
 
     // Special endpoint to view current configuration
     if (url.pathname === '/config') {
-      const config = (this.constructor as typeof Container).containerConfig;
+      const config = {
+        env: this.env,
+        entrypoint: this.entrypoint,
+        enableInternet: this.enableInternet
+      };
       return new Response(JSON.stringify({
         port: this.defaultPort,
         config: config
