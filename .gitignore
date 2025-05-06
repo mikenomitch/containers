@@ -5,3 +5,4 @@
 **/node_modules/
 **/dist/
 **/coverage/
+**/example/node_modules
