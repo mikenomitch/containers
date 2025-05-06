@@ -63,13 +63,6 @@ export class Container<Env = unknown> extends (Server as any) {
   entrypoint?: string[];
   enableInternet: boolean = true;
 
-  // State management removed
-
-  // State getter removed
-
-  // Options like hibernate are now controlled via instance properties
-  // For example, sleepAfter controls hibernation timing
-
   /**
    * Execute SQL queries against the Container's database
    */
@@ -101,12 +94,7 @@ export class Container<Env = unknown> extends (Server as any) {
       if (options.defaultPort !== undefined) this.defaultPort = options.defaultPort;
       if (options.sleepAfter !== undefined) this.sleepAfter = options.sleepAfter;
       if (options.explicitContainerStart !== undefined) this.explicitContainerStart = options.explicitContainerStart;
-
-      // Instance-specific container configuration overrides are no longer supported
-      // If you need to customize container config, extend the Container class and override the static containerConfig
     }
-
-    // State table creation removed
 
     // Create schedules table if it doesn't exist
     this.sql`
@@ -312,7 +300,6 @@ export class Container<Env = unknown> extends (Server as any) {
       // Try to connect to the port multiple times
       for (let i = 0; i < maxTries && !portReady; i++) {
         try {
-          // Use http://ping like in containers-starter-go implementation
           await tcpPort.fetch("http://ping");
 
           // Successfully connected to this port
@@ -345,8 +332,6 @@ export class Container<Env = unknown> extends (Server as any) {
     // Initialize activity timeout after successful start
     await this.renewActivityTimeout();
   }
-
-  // startAndWaitForPort method removed
 
   /**
    * Send a request to the container (HTTP or WebSocket)
@@ -531,8 +516,6 @@ export class Container<Env = unknown> extends (Server as any) {
     // Call shutdown handler
     this.onShutdown();
   }
-
-  // setState and setStateInternal methods removed
 
   /**
    * Lifecycle method called when container boots successfully
