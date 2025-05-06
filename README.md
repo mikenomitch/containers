@@ -61,7 +61,9 @@ The main class that wraps a container-enbled Durable Object to provide container
 - `requiredPorts?`: Array of ports that should be checked for availability during container startup. Used by startAndWaitForPorts when no specific ports are provided.
 - `sleepAfter`: How long to keep the container alive without activity (format: number for seconds, or string like "5m", "30s", "1h")
 - `explicitContainerStart`: If true, container won't start automatically on DO boot (default: false). Set as a class property or via constructor options.
-- `containerConfig`: Configuration for the container's environment, entrypoint, and network access
+- `env`: Environment variables to pass to the container (Record<string, string>)
+- `entrypoint?`: Custom entrypoint to override container default (string[])
+- `enableInternet`: Whether to enable internet access for the container (boolean, default: true)
 - Lifecycle methods: `onBoot`, `onShutdown`, `onError`
 
 #### Constructor Options
@@ -166,7 +168,7 @@ By default `fetch` also will do this by calling `containerFetch`.
 
 ### Container Configuration Example
 
-You can configure how the container starts using the `containerConfig` property:
+You can configure how the container starts by setting the instance properties for environment variables, entrypoint, and network access:
 
 ```typescript
 import { Container } from 'cf-containers-nomitch';
@@ -178,23 +180,20 @@ export class ConfiguredContainer extends Container {
   // Set the timeout for sleeping the container after inactivity
   sleepAfter = "2h";
 
-  // Override the default container configuration
-  containerConfig = {
-    // Environment variables to pass to the container
-    env: {
-      NODE_ENV: 'production',
-      LOG_LEVEL: 'info',
-      APP_PORT: '9000'
-    },
-
-    // Custom entrypoint to run in the container
-    entrypoint: ['node', 'server.js', '--config', 'production.json'],
-
-    // Enable internet access for the container
-    enableInternet: true
+  // Environment variables to pass to the container
+  env = {
+    NODE_ENV: 'production',
+    LOG_LEVEL: 'info',
+    APP_PORT: '9000'
   };
 
-  // containerConfig will be used automatically
+  // Custom entrypoint to run in the container
+  entrypoint = ['node', 'server.js', '--config', 'production.json'];
+
+  // Enable internet access for the container
+  enableInternet = true;
+
+  // These configuration properties will be used automatically
   // when the container boots
 }
 ```
