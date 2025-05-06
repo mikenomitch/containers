@@ -86,7 +86,6 @@ constructor(ctx: any, env: Env, options?: {
 ##### Container Methods
 - `startContainer()`: Starts the container if it's not running and sets up monitoring, without waiting for any ports to be ready.
 - `startAndWaitForPorts(ports?, maxTries?)`: Starts the container using startContainer and then waits for specified ports to be ready. If no ports are specified, uses `requiredPorts` or `defaultPort`. If no ports can be determined, just starts the container without port checks.
-- `startAndWaitForPort(port?, maxTries?)`: (Deprecated) Backwards compatibility method that calls startAndWaitForPorts.
 - `containerFetch(request, port?)`: Sends an HTTP or WebSocket request to the container. Either port parameter or defaultPort must be specified. Automatically detects WebSocket upgrade requests.
 - `shutdownContainer(reason?)`: Stops the container
 - `fetch(request)`: Default handler to forward HTTP requests to the container
@@ -143,7 +142,7 @@ export class MyContainer extends Container {
 
   // Handle incoming requests
   async fetch(request: Request): Promise<Response> {
-  
+
     // Default implementation forwards requests to the container
     // This will automatically renew the activity timeout
     return await this.containerFetch(request);
