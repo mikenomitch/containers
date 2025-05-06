@@ -1,5 +1,5 @@
 export { Container, getCurrentContainer } from "./lib/container";
-export { loadBalance, randomContainerId } from "./lib/utils";
+export { loadBalance } from "./lib/utils";
 export type {
   ContainerOptions,
   ContainerContext,

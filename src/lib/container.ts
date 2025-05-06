@@ -1,4 +1,4 @@
-import { Server, type Connection, type ConnectionContext, type WebSocket } from "partyserver";
+import { Server, type Connection } from "partyserver";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { nanoid } from "nanoid";
 import type {

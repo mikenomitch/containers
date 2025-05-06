@@ -4,12 +4,11 @@ A class for interacting with Containers on Cloudflare Workers.
 
 ## Features
 
-- Simplified container lifecycle management
-- Automatic port detection and waiting
 - HTTP request proxying and WebSocket forwarding
-- Automatic container sleep timeout with activity-based renewal
+- Simple container lifecycle management (starting and stopping containers)
+- Event hooks for container lifecycle events (onBoot, onShutdown, onError)
+- Configurable sleep timeout that renews on requests
 - Load balancing utilities
-- Event hooks for container lifecycle events
 
 ## Installation
 
@@ -25,14 +24,15 @@ import { Container, loadBalance } from 'cf-containers-nomitch';
 export class MyContainer extends Container {
   // Configure default port for the container
   defaultPort = 8080;
+  sleepAfter = "1m";
 }
 
 export default {
   async fetch(request, env) {
     const pathname = new URL(request.url).pathname;
 
-    // If you wish to route requests to a specific container,
-    // pass a container identifier to .get()
+    // If you want to route requests to a specific container,
+    // pass a unique container identifier to .get()
 
     if (pathname.startsWith("/specific/")) {
       // In this case, each unique pathname will spawn a new container
@@ -41,8 +41,9 @@ export default {
       return await stub.fetch(request);
     }
 
-    // Otherwise, fall back to one of 5 containers
-    let container = await loadBalance(env.MY_CONTAINER, 5); // 5 is instance count
+    // If you want to route to one of many containers (in this case 5),
+    // use the loadBalance helper
+    let container = await loadBalance(env.MY_CONTAINER, 5);
     return await container.fetch(request);
   },
 };
@@ -79,28 +80,28 @@ constructor(ctx: any, env: Env, options?: {
 #### Methods
 
 ##### Lifecycle Methods
+
 - `onBoot()`: Called when container boots successfully - override to add custom behavior
 - `onShutdown()`: Called when container shuts down - override to add custom behavior
 - `onError(error)`: Called when container encounters an error - override to add custom behavior
 
 ##### Container Methods
+
+- `fetch(request)`: Default handler to forward HTTP requests to the container. Can be overridden.
+- `containerFetch(request, port?)`: Sends an HTTP or WebSocket request to the container. Either port parameter or defaultPort must be specified. Automatically detects WebSocket upgrade requests.
 - `startContainer()`: Starts the container if it's not running and sets up monitoring, without waiting for any ports to be ready.
 - `startAndWaitForPorts(ports?, maxTries?)`: Starts the container using startContainer and then waits for specified ports to be ready. If no ports are specified, uses `requiredPorts` or `defaultPort`. If no ports can be determined, just starts the container without port checks.
-- `containerFetch(request, port?)`: Sends an HTTP or WebSocket request to the container. Either port parameter or defaultPort must be specified. Automatically detects WebSocket upgrade requests.
 - `shutdownContainer(reason?)`: Stops the container
-- `fetch(request)`: Default handler to forward HTTP requests to the container
 - `renewActivityTimeout()`: Manually renews the container activity timeout (extends container lifetime)
 - `shutdownDueToInactivity()`: Called automatically when the container times out due to inactivity
 
 ### Utility Functions
 
 - `loadBalance(binding, instances?)`: Load balances requests across multiple container instances
-- `randomContainerId(max)`: Generates a random container ID for load balancing
-
 
 ## Examples
 
-### Basic HTTP Example
+### HTTP Example with Lifecycle Hooks
 
 ```typescript
 import { Container } from 'cf-containers-nomitch';
@@ -113,7 +114,6 @@ export class MyContainer extends Container {
   // Supported formats: "10m" (minutes), "30s" (seconds), "1h" (hours), or a number (seconds)
   sleepAfter = "10m";
 
-
   // Lifecycle method called when container boots
   override onBoot(): void {
     console.log('Container booted!');
@@ -123,7 +123,6 @@ export class MyContainer extends Container {
   override onShutdown(): void {
     console.log('Container shutdown!');
   }
-
 
   // Lifecycle method called on errors
   override onError(error: unknown): any {
@@ -163,7 +162,6 @@ You can call the `containerFetch` method directly to establish WebSocket connect
 const response = await container.containerFetch(request, 9000);
 ```
 
-The `containerFetch` method will automatically detect WebSocket upgrade requests based on the 'Upgrade: websocket' header.
 By default `fetch` also will do this by calling `containerFetch`.
 
 ### Container Configuration Example
@@ -176,6 +174,9 @@ import { Container } from 'cf-containers-nomitch';
 export class ConfiguredContainer extends Container {
   // Default port for the container
   defaultPort = 9000;
+
+  // Set the timeout for sleeping the container after inactivity
+  sleepAfter = "2h";
 
   // Override the default container configuration
   containerConfig = {
@@ -193,10 +194,8 @@ export class ConfiguredContainer extends Container {
     enableInternet: true
   };
 
-  constructor(ctx: any, env: any) {
-    super(ctx, env);
-    // containerConfig will be used automatically when the container boots
-  }
+  // containerConfig will be used automatically
+  // when the container boots
 }
 ```
 
@@ -212,6 +211,7 @@ export class ManualStartContainer extends Container {
   defaultPort = 8080;
 
   // Specify multiple required ports that must be ready before the container is considered booted
+  // if this is not specified, by default, you will wait only defaultPort
   requiredPorts = [8080, 9090, 3000];
 
   // Disable automatic container startup (preferred way as a class property)
@@ -261,78 +261,6 @@ export class ManualStartContainer extends Container {
 
     // For all other requests, forward to the container
     return await this.containerFetch(request);
-  }
-}
-```
-
-### Multiple Required Ports Example
-
-This example demonstrates how to use the `requiredPorts` property to ensure that multiple services inside your container are ready before the container is considered booted:
-
-```typescript
-import { Container } from 'cf-containers-nomitch';
-
-export class MultiPortContainer extends Container {
-  // Default port for the public website
-  defaultPort = 80;
-
-  // List all ports that should be verified during container startup
-  requiredPorts = [
-    80,   // Public website
-    3000, // API server
-    9090  // Metrics endpoint
-  ];
-
-  // Startup timeout in seconds (default is 10 retries with 300ms between each)
-  startTimeout = 30;
-
-  constructor(ctx: any, env: any) {
-    super(ctx, env);
-  }
-
-  // Custom port verification for a more complex container
-  async verifyContainer(): Promise<void> {
-    // Use startAndWaitForPorts without arguments to check all requiredPorts
-    await this.startAndWaitForPorts(undefined, this.startTimeout);
-    console.log('All container services are ready!');
-  }
-
-  // Enhanced boot handler with extra verification
-  override async onBoot() {
-    console.log('Container passed basic port checks, verifying services...');
-
-    // Perform additional service health checks if needed
-    const apiHealth = await this.containerFetch(
-      new Request('http://healthcheck/api/health'),
-      3000
-    );
-
-    console.log('API health check status:', apiHealth.status);
-
-  }
-
-  async fetch(request: Request): Promise<Response> {
-    // Route traffic based on URL path
-    const url = new URL(request.url);
-
-    try {
-      if (url.pathname.startsWith('/api')) {
-        // API server runs on port 3000
-        return await this.containerFetch(request, 3000);
-      }
-      else if (url.pathname.startsWith('/metrics')) {
-        // Metrics endpoint on port 9090
-        return await this.containerFetch(request, 9090);
-      }
-      else {
-        // Public website on port 80 (defaultPort)
-        return await this.containerFetch(request, 80);
-      }
-    } catch (error) {
-      return new Response(`Error: ${error instanceof Error ? error.message : String(error)}`, {
-        status: 500
-      });
-    }
   }
 }
 ```
@@ -393,13 +321,12 @@ export class TimeoutContainer extends Container {
   // Set timeout to 30 minutes of inactivity
   sleepAfter = "30m";  // Supports "30s", "5m", "1h" formats, or a number in seconds
 
-
   // Custom method that will extend the container's lifetime
   async performBackgroundTask(data: any): Promise<void> {
-    console.log('Performing background task with data:', data);
+    console.log('Performing background task...');
 
-
-    // Manually renew the activity timeout
+    // Manually renew the activity timeout, even though
+    // you have not made a request to the container
     await this.renewActivityTimeout();
 
     console.log('Container activity timeout renewed');
@@ -411,8 +338,7 @@ export class TimeoutContainer extends Container {
 
     // Example endpoint to trigger background task
     if (url.pathname === '/task') {
-      const taskData = { id: Date.now().toString() };
-      await this.performBackgroundTask(taskData);
+      await this.performBackgroundTask();
 
       return new Response(JSON.stringify({
         success: true,
@@ -429,6 +355,10 @@ export class TimeoutContainer extends Container {
 ```
 
 ### Using Load Balancing
+
+This package includes a `loadBalance` helper which routes requests to one of N instances.
+In the future, this will be automatically handled  with smart by Cloudflare Containers
+with autoscaling set to true, but is not yet implemented.
 
 ```typescript
 import { Container, loadBalance } from 'cf-containers-nomitch';
