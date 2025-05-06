@@ -9,8 +9,9 @@ import (
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	message := os.Getenv("MESSAGE")
+	deploymentId := os.Getenv("CLOUDFLARE_DEPLOYMENT_ID")
 
-	fmt.Fprintf(w, "Hi, I'm a container and this is my message: %s", message)
+	fmt.Fprintf(w, "Hi, I'm a container and this is my message: %s, and my deployment ID is: %s", message, deploymentId)
 }
 
 func errorHandler(w http.ResponseWriter, r *http.Request) {

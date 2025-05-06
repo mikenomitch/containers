@@ -1,14 +1,11 @@
 import { Container, loadBalance } from 'cf-containers-nomitch';
 
 export class MyContainer extends Container {
-  // Configure default port for the container
   defaultPort = 8080;
   sleepAfter = "10s";
-  containerConfig = {
-    env: {
-      MESSAGE: "I was passed in via the container class!",
-    },
-  }
+  env = {
+    MESSAGE: "I was passed in via the container class!",
+  };
 
   override onBoot() {
     console.log("Container successfully booted");
