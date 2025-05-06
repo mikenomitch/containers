@@ -156,44 +156,6 @@ export class MyContainer extends Container {
 
 The Container class automatically supports proxying WebSocket connections to your container. WebSocket connections are bi-directionally proxied, with messages forwarded in both directions. The Container also automatically renews the activity timeout when WebSocket messages are sent or received.
 
-#### WebSocket Example
-
-Here's an example of a Container class that supports both HTTP and WebSocket proxying:
-
-```typescript
-import { Container } from 'cf-containers-nomitch';
-
-export class WebSocketProxyContainer extends Container {
-  // Configure default port for the container
-  defaultPort = 8080;
-
-
-  constructor(ctx: any, env: any) {
-    super(ctx, env);
-  }
-
-  /**
-   * Handle incoming HTTP/WebSocket requests
-   */
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-
-    // Check if this is a WebSocket upgrade request
-    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-
-      // containerFetch automatically detects and handles WebSocket connections
-      // it sets up bi-directional message forwarding
-      return this.containerFetch(request, this.defaultPort);
-    }
-
-    // For regular HTTP requests, fetch as usual
-    return await this.containerFetch(request);
-  }
-}
-```
-
-#### Direct WebSocket Connections
-
 You can call the `containerFetch` method directly to establish WebSocket connections:
 
 ```typescript
@@ -201,7 +163,8 @@ You can call the `containerFetch` method directly to establish WebSocket connect
 const response = await container.containerFetch(request, 9000);
 ```
 
-The containerFetch method will automatically detect WebSocket upgrade requests based on the 'Upgrade: websocket' header.
+The `containerFetch` method will automatically detect WebSocket upgrade requests based on the 'Upgrade: websocket' header.
+By default `fetch` also will do this by calling `containerFetch`.
 
 ### Container Configuration Example
 
