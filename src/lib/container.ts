@@ -3,13 +3,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { nanoid } from "nanoid";
 import type {
   ContainerOptions,
-  ContainerState,
   Schedule
 } from "../types";
-
-const STATE_ROW_ID = "container_state_row_id";
-const STATE_CHANGED_ID = "container_state_changed_id";
-const DEFAULT_STATE = {} as ContainerState;
 
 // Context for storing container and connection information
 const containerContext = new AsyncLocalStorage<{
@@ -73,50 +68,9 @@ export class Container<Env = unknown> extends (Server as any) {
     enableInternet: true
   };
 
-  // Internal state
-  #state = DEFAULT_STATE;
-  /**
-   * Initial state for the Container
-   */
-  initialState: ContainerState = DEFAULT_STATE;
+  // State management removed
 
-  /**
-   * Current state of the Container
-   */
-  get state(): ContainerState {
-    if (this.#state !== DEFAULT_STATE) {
-      // State was previously set
-      return this.#state;
-    }
-
-    // Check if state was set in previous session
-    const wasChanged = this.sql<{ state: "true" | undefined }>`
-      SELECT state FROM container_state WHERE id = ${STATE_CHANGED_ID}
-    `;
-
-    // Get the actual state from the database
-    const result = this.sql<{ state: ContainerState | undefined }>`
-      SELECT state FROM container_state WHERE id = ${STATE_ROW_ID}
-    `;
-
-    if (
-      wasChanged[0]?.state === "true" ||
-      result[0]?.state
-    ) {
-      // Convert the state to string before parsing
-      const stateStr = JSON.stringify(result[0]?.state);
-      this.#state = JSON.parse(stateStr);
-      return this.#state;
-    }
-
-    // First time access, set initial state if provided
-    if (this.initialState === DEFAULT_STATE) {
-      return {} as ContainerState;
-    }
-
-    this.setState(this.initialState);
-    return this.initialState;
-  }
+  // State getter removed
 
   /**
    * Container configuration options
@@ -161,13 +115,7 @@ export class Container<Env = unknown> extends (Server as any) {
       // If you need to customize container config, extend the Container class and override the static containerConfig
     }
 
-    // Create state table if it doesn't exist
-    this.sql`
-      CREATE TABLE IF NOT EXISTS container_state (
-        id TEXT PRIMARY KEY NOT NULL,
-        state TEXT
-      )
-    `;
+    // State table creation removed
 
     // Create schedules table if it doesn't exist
     this.sql`
@@ -187,7 +135,7 @@ export class Container<Env = unknown> extends (Server as any) {
       await this.#tryCatch(async () => {
         // Execute any pending schedules
         await this.alarm();
-        
+
         // Schedule next alarms
         await this.#scheduleNextAlarm();
       });
@@ -196,9 +144,9 @@ export class Container<Env = unknown> extends (Server as any) {
     // Start the container automatically if needed
     this.ctx.blockConcurrencyWhile(async () => {
       if (this.shouldAutoStart()) {
-        // Start container without waiting for port if defaultPort is not set
-        await this.startAndWaitForPort(this.defaultPort);
-        // Activity timeout is initialized in startAndWaitForPort
+        // Start container and wait for any required ports
+        await this.startAndWaitForPorts();
+        // Activity timeout is initialized in startAndWaitForPorts
       }
     });
   }
@@ -211,100 +159,220 @@ export class Container<Env = unknown> extends (Server as any) {
   }
 
   /**
-   * Start the container and wait for a port to be available (if port is specified)
-   * Based on containers-starter-go implementation
+   * Start the container if it's not running and set up monitoring
+   *
+   * This method handles the core container startup process without waiting for ports to be ready.
+   * It will automatically retry if the container fails to start, up to maxTries attempts.
+   *
+   * It's useful when you need to:
+   * - Start a container without blocking until a port is available
+   * - Initialize a container that doesn't expose ports
+   * - Perform custom port availability checks separately
+   *
+   * The method applies the static containerConfig from your Container subclass, including:
+   * - Environment variables (env)
+   * - Custom entrypoint commands (entrypoint)
+   * - Internet access settings (enableInternet)
+   *
+   * It also sets up monitoring to track container lifecycle events and automatically
+   * calls the onShutdown handler when the container terminates.
+   *
+   * @example
+   * // Basic usage in a custom Container implementation
+   * async customInitialize() {
+   *   // Start the container without waiting for a port
+   *   await this.startContainer();
+   *
+   *   // Perform additional initialization steps
+   *   // that don't require port access
+   * }
+   *
+   * @param maxTries - Maximum number of attempts to start the container before failing
+   * @returns A promise that resolves when the container start command has been issued
+   * @throws Error if no container context is available or if all start attempts fail
    */
-  async startAndWaitForPort(port?: number, maxTries: number = 10): Promise<void> {
+  async startContainer(maxTries: number = 10): Promise<void> {
     if (!this.ctx.container) {
       throw new Error("No container found in context");
     }
 
-    // Variable to track monitor setup
-    let monitor;
-
     // Start the container if it's not running
     if (!this.ctx.container.running) {
-      console.log("Starting container...");
       // Use the static class configuration
       const config = (this.constructor as typeof Container).containerConfig;
-      this.ctx.container.start({
-        env: config.env,
-        entrypoint: config.entrypoint,
-        enableInternet: config.enableInternet,
-      });
-      
-      // Set up monitoring only when we start the container
-      try {
-        console.log("Setting up monitoring...");
-        // Track container status
-        monitor = this.ctx.container.monitor().then(() => {
-          this.onShutdown(this.state);
-        }).catch((error: unknown) => {
-          this.onError(error);
-        });
-      } catch (e) {
-        console.warn("Error setting up container monitor:", e);
+
+      // Try to start the container, with retries
+      let containerStarted = false;
+      let lastError = null;
+
+      for (let i = 0; i < maxTries && !containerStarted; i++) {
+        try {
+          console.log(`Starting container (attempt ${i + 1}/${maxTries})`);
+          this.ctx.container.start({
+            env: config.env,
+            entrypoint: config.entrypoint,
+            enableInternet: config.enableInternet,
+          });
+
+          // Set up monitoring only when we start the container
+          try {
+            // Track container status
+            this.ctx.container.monitor().then(() => {
+              this.onShutdown();
+            }).catch((error: unknown) => {
+              this.onError(error);
+            });
+
+            containerStarted = true;
+            break;
+          } catch (e) {
+            console.warn("Error setting up container monitor:", e);
+            lastError = e;
+
+            // If we're not on the last attempt, wait a bit before retrying
+            if (i < maxTries - 1) {
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+          }
+        } catch (e) {
+          console.error(`Container start error (attempt ${i + 1}/${maxTries}):`, e);
+          lastError = e;
+
+          // If we're not on the last attempt, wait a bit before retrying
+          if (i < maxTries - 1) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+        }
+      }
+
+      // If we've tried maxTries times and still couldn't start the container, throw an error
+      if (!containerStarted) {
+        throw new Error(`Failed to start container after ${maxTries} attempts: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
       }
     }
+  }
 
-    // If no port is specified, just start the container without waiting for port readiness
-    if (port === undefined) {
-      console.log("No port...");
+  /**
+   * Required ports that should be checked for availability during container startup
+   * Override this in your subclass to specify ports that must be ready
+   */
+  requiredPorts?: number[];
+
+  /**
+   * Start the container and wait for ports to be available
+   * Based on containers-starter-go implementation
+   *
+   * This method builds on startContainer by adding port availability verification:
+   * 1. Calls startContainer to ensure the container is running
+   * 2. If no ports are specified and requiredPorts is not set, it uses defaultPort (if set)
+   * 3. If no ports can be determined, it calls onBoot and renewActivityTimeout immediately
+   * 4. For each specified port, it polls until the port is available or maxTries is reached
+   * 5. When all ports are available, it triggers onBoot and renewActivityTimeout
+   *
+   * The method prioritizes port sources in this order:
+   * 1. Ports specified directly in the method call
+   * 2. requiredPorts class property (if set)
+   * 3. defaultPort (if neither of the above is specified)
+   *
+   * @param ports - The ports to wait for (if undefined, uses requiredPorts or defaultPort)
+   * @param maxTries - Maximum number of attempts to connect to each port before failing
+   * @throws Error if port checks fail after maxTries attempts
+   */
+  async startAndWaitForPorts(ports?: number | number[], maxTries: number = 10): Promise<void> {
+    if (!this.ctx.container) {
+      throw new Error("No container found in context");
+    }
+
+    // Start the container if it's not running
+    await this.startContainer(maxTries);
+
+    // Determine which ports to check
+    let portsToCheck: number[] = [];
+
+    if (ports !== undefined) {
+      // Use explicitly provided ports (single port or array)
+      portsToCheck = Array.isArray(ports) ? ports : [ports];
+    } else if (this.requiredPorts && this.requiredPorts.length > 0) {
+      // Use requiredPorts class property if available
+      portsToCheck = [...this.requiredPorts];
+    } else if (this.defaultPort !== undefined) {
+      // Fall back to defaultPort if available
+      portsToCheck = [this.defaultPort];
+    }
+
+    // If no ports to check, just start the container without waiting for port readiness
+    if (portsToCheck.length === 0) {
       // Successfully started the container (without port check)
-      this.onBoot(this.state);
+      this.onBoot();
       // Initialize activity timeout after successful start
       await this.renewActivityTimeout();
       return;
     }
 
-    console.log("Setting up monitoring...");
-    const tcpPort = this.ctx.container.getTcpPort(port);
+    // Check each port
+    for (const port of portsToCheck) {
+      const tcpPort = this.ctx.container.getTcpPort(port);
+      let portReady = false;
 
-    // Try to connect to the port multiple times
-    for (let i = 0; i < maxTries; i++) {
-      try {
-        console.log("make fetch...");
-        // Use http://ping like in containers-starter-go implementation
-        const response = await tcpPort.fetch("http://ping");
-        
-        // Successfully connected, container is ready
-        this.onBoot(this.state);
-        // Initialize activity timeout after successful start
-        await this.renewActivityTimeout();
-        return;
-      } catch (e) {
-        console.log("ERROR WHILE FETCHING", e);
-        
-        // Check for specific error messages that indicate we should keep retrying
-        const errorMessage = e instanceof Error ? e.message : String(e);
-        if (errorMessage.includes("listening") || 
-            errorMessage.includes("there is no container instance")) {
-          console.log("Container not yet ready, retrying...");
-        } else {
-          // Log other errors but continue with retries
-          console.error("Container connection error:", errorMessage);
+      // Try to connect to the port multiple times
+      for (let i = 0; i < maxTries && !portReady; i++) {
+        try {
+          // Use http://ping like in containers-starter-go implementation
+          await tcpPort.fetch("http://ping");
+
+          // Successfully connected to this port
+          portReady = true;
+          console.log(`Port ${port} is ready`);
+        } catch (e) {
+          // Check for specific error messages that indicate we should keep retrying
+          const errorMessage = e instanceof Error ? e.message : String(e);
+          if (errorMessage.includes("listening") ||
+              errorMessage.includes("there is no container instance")) {
+            console.log(`Port ${port} not yet ready, retrying...`);
+          } else {
+            // Log other errors but continue with retries
+            console.error(`Port ${port} connection error:`, errorMessage);
+          }
+
+          // If we're on the last attempt and the port is still not ready, fail
+          if (i === maxTries - 1) {
+            throw new Error(`Failed to verify port ${port} is available after ${maxTries} attempts`);
+          }
+
+          // Wait a bit before trying again (300ms like in containers-starter-go)
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
       }
-
-      // Wait a bit before trying again (300ms like in containers-starter-go)
-      await new Promise(resolve => setTimeout(resolve, 300));
     }
 
-    throw new Error(`Failed to verify container is running after ${maxTries} attempts`);
+    // All ports are ready
+    this.onBoot();
+    // Initialize activity timeout after successful start
+    await this.renewActivityTimeout();
   }
 
+  // startAndWaitForPort method removed
+
   /**
-   * Proxy an HTTP request to the container
+   * Send a request to the container (HTTP or WebSocket)
    * Based on containers-starter-go implementation
+   *
+   * This method handles both HTTP and WebSocket requests to the container.
+   * For WebSocket requests, it sets up bidirectional message forwarding with proper
+   * activity timeout renewal.
+   *
+   * @param request The request to send to the container
+   * @param port The port to connect to (defaults to this.defaultPort)
+   * @returns A Response from the container, or WebSocket connection
    */
-  async proxyRequest(request: Request, port?: number): Promise<Response> {
+  async containerFetch(request: Request, port?: number, maxTries: number = 10): Promise<Response> {
     if (!this.ctx.container) {
       throw new Error("No container found in context");
     }
 
     // Require a port to be specified, either as a parameter or as a defaultPort property
     if (port === undefined && this.defaultPort === undefined) {
-      throw new Error("No port specified for proxy request. Set defaultPort or specify a port parameter.");
+      throw new Error("No port specified for container fetch. Set defaultPort or specify a port parameter.");
     }
 
     // Use specified port or defaultPort
@@ -312,7 +380,7 @@ export class Container<Env = unknown> extends (Server as any) {
 
     if (!this.ctx.container.running) {
       try {
-        await this.startAndWaitForPort(targetPort);
+        await this.startAndWaitForPorts(targetPort, maxTries);
       } catch (e) {
         return new Response(`Failed to start container: ${e instanceof Error ? e.message : String(e)}`, { status: 500 });
       }
@@ -320,29 +388,135 @@ export class Container<Env = unknown> extends (Server as any) {
 
     const tcpPort = this.ctx.container.getTcpPort(targetPort!);
 
-    // Create URL for the container request
-    const url = new URL(request.url);
-    // Ensure we handle URLs properly whether they have search params or not
-    const containerUrl = `http://container${url.pathname}${url.search || ''}`;
+    // Check if this is a WebSocket upgrade request
+    const isWebSocket = request.headers.get('Upgrade')?.toLowerCase() === 'websocket';
 
-    // Clone the request to forward to the container
-    const requestInit: RequestInit = {
-      method: request.method,
-      headers: request.headers,
-    };
+    if (isWebSocket) {
+      // Handle WebSocket connection
+      try {
+        // Renew activity timeout
+        await this.renewActivityTimeout();
 
-    // Add body for non-GET/HEAD requests
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      requestInit.body = await request.clone().arrayBuffer();
-    }
+        // Create a WebSocket connection to the container
+        const containerUrl = `http://container/ws`;
+        const containerRes = await tcpPort.fetch(containerUrl, {
+          headers: {
+            'Upgrade': 'websocket',
+            'Connection': 'Upgrade'
+          }
+        });
 
-    try {
-      // Renew the activity timeout whenever a request is proxied
-      await this.renewActivityTimeout();
-      return await tcpPort.fetch(containerUrl, requestInit);
-    } catch (e) {
-      console.error("Error proxying request to container:", e);
-      return new Response(`Error proxying request to container: ${e instanceof Error ? e.message : String(e)}`, { status: 500 });
+        // Check if we got a WebSocket from the container
+        // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
+        if (!containerRes.webSocket) {
+          return new Response('Container WebSocket server is not available', { status: 500 });
+        }
+
+        // Create a WebSocket pair for the client
+        // @ts-ignore - WebSocketPair is provided by PartyKit
+        const pair = new WebSocketPair();
+        const clientWs = pair[0];
+        const serverWs = pair[1];
+
+        // Accept the WebSocket connection from the client
+        serverWs.accept();
+        // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
+        containerRes.webSocket.accept();
+
+        // Forward messages from client to container
+        serverWs.addEventListener('message', (event: { data: string | ArrayBufferLike }) => {
+          try {
+            // Renew timeout on activity
+            this.renewActivityTimeout();
+            // Forward message to container
+            // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
+            containerRes.webSocket?.send(event.data);
+          } catch (e) {
+            console.error('Error forwarding message to container:', e);
+          }
+        });
+
+        // Forward messages from container to client
+        // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
+        containerRes.webSocket.addEventListener('message', (event: { data: string | ArrayBufferLike }) => {
+          try {
+            // Renew timeout on activity
+            this.renewActivityTimeout();
+            // Forward message to client
+            serverWs.send(event.data);
+          } catch (e) {
+            console.error('Error forwarding message to client:', e);
+          }
+        });
+
+        // Handle client closing the connection
+        serverWs.addEventListener('close', (event: { code: number; reason: string }) => {
+          try {
+            // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
+            containerRes.webSocket?.close(event.code, event.reason);
+          } catch (e) {
+            console.error('Error closing container WebSocket:', e);
+          }
+        });
+
+        // Handle container closing the connection
+        // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
+        containerRes.webSocket.addEventListener('close', (event: { code: number; reason: string }) => {
+          try {
+            serverWs.close(event.code, event.reason);
+          } catch (e) {
+            console.error('Error closing client WebSocket:', e);
+          }
+        });
+
+        // Handle errors on both sides
+        serverWs.addEventListener('error', (event: any) => {
+          console.error('Client WebSocket error:', event);
+          try {
+            // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
+            containerRes.webSocket?.close(1011, 'Error in client WebSocket');
+          } catch (e) {
+            // Ignore
+          }
+        });
+
+        // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
+        containerRes.webSocket.addEventListener('error', (event: any) => {
+          console.error('Container WebSocket error:', event);
+          try {
+            serverWs.close(1011, 'Error in container WebSocket');
+          } catch (e) {
+            // Ignore
+          }
+        });
+
+        // Return the client side of the WebSocket pair
+        return new Response(null, {
+          status: 101,
+          // @ts-ignore - The webSocket property is not in the ResponseInit type but is supported by PartyKit
+          webSocket: clientWs
+        });
+      } catch (e) {
+        console.error('Error establishing WebSocket connection:', e);
+        return new Response(`Error establishing WebSocket connection: ${e instanceof Error ? e.message : String(e)}`,
+          { status: 500 });
+      }
+    } else {
+      // Handle regular HTTP request
+
+      // Create URL for the container request
+      const url = new URL(request.url);
+      // Ensure we handle URLs properly whether they have search params or not
+      const containerUrl = `http://container${url.pathname}${url.search || ''}`;
+
+      try {
+        // Renew the activity timeout whenever a request is proxied
+        await this.renewActivityTimeout();
+        return await tcpPort.fetch(containerUrl, request);
+      } catch (e) {
+        console.error("Error proxying request to container:", e);
+        return new Response(`Error proxying request to container: ${e instanceof Error ? e.message : String(e)}`, { status: 500 });
+      }
     }
   }
 
@@ -360,51 +534,16 @@ export class Container<Env = unknown> extends (Server as any) {
     this.ctx.container.destroy(reason || "Container shutdown requested");
 
     // Call shutdown handler
-    this.onShutdown(this.state);
+    this.onShutdown();
   }
 
-  /**
-   * Update the container's state
-   */
-  setState(state: ContainerState): void {
-    this.#setStateInternal(state, "server");
-  }
-
-  /**
-   * Internal method to update state and notify clients
-   */
-  #setStateInternal(state: ContainerState, source: Connection | "server" = "server"): void {
-    this.#state = state;
-
-    // Store state in database
-    this.sql`
-      INSERT OR REPLACE INTO container_state (id, state)
-      VALUES (${STATE_ROW_ID}, ${JSON.stringify(state)})
-    `;
-
-    this.sql`
-      INSERT OR REPLACE INTO container_state (id, state)
-      VALUES (${STATE_CHANGED_ID}, ${JSON.stringify(true)})
-    `;
-
-    // Broadcast state change to all clients except the source
-    this.broadcast(
-      JSON.stringify({
-        type: "container_state",
-        state: state,
-      }),
-      source !== "server" ? [source.id] : []
-    );
-
-    // Call onStateUpdate hook
-    this.onStateUpdate(state);
-  }
+  // setState and setStateInternal methods removed
 
   /**
    * Lifecycle method called when container boots successfully
    * Override this method in subclasses to handle container boot events
    */
-  onBoot(state?: ContainerState): void | Promise<void> {
+  onBoot(): void | Promise<void> {
     // Default implementation does nothing
   }
 
@@ -412,15 +551,7 @@ export class Container<Env = unknown> extends (Server as any) {
    * Lifecycle method called when container shuts down
    * Override this method in subclasses to handle container shutdown events
    */
-  onShutdown(state?: ContainerState): void | Promise<void> {
-    // Default implementation does nothing
-  }
-
-  /**
-   * Lifecycle method called when container state is updated
-   * Override this method in subclasses to handle state changes
-   */
-  onStateUpdate(state: ContainerState): void | Promise<void> {
+  onShutdown(): void | Promise<void> {
     // Default implementation does nothing
   }
 
@@ -508,7 +639,7 @@ export class Container<Env = unknown> extends (Server as any) {
       this.#sleepTimeoutTaskId = null;
     }
   }
-  
+
   /**
    * Schedule a task to be executed in the future
    * @template T Type of the payload data
@@ -523,29 +654,29 @@ export class Container<Env = unknown> extends (Server as any) {
     payload?: T
   ): Promise<Schedule<T>> {
     const id = nanoid(9);
-    
+
     // Ensure the callback is a string (method name)
     if (typeof callback !== "string") {
       throw new Error("Callback must be a string (method name)");
     }
-    
+
     // Ensure the method exists
     if (typeof this[callback] !== "function") {
       throw new Error(`this.${callback} is not a function`);
     }
-    
+
     // Schedule based on the type of 'when' parameter
     if (when instanceof Date) {
       // Schedule for a specific time
       const timestamp = Math.floor(when.getTime() / 1000);
-      
+
       this.sql`
         INSERT OR REPLACE INTO container_schedules (id, callback, payload, type, time)
         VALUES (${id}, ${callback}, ${JSON.stringify(payload)}, 'scheduled', ${timestamp})
       `;
-      
+
       await this.#scheduleNextAlarm();
-      
+
       return {
         id,
         callback: callback,
@@ -556,14 +687,14 @@ export class Container<Env = unknown> extends (Server as any) {
     } else if (typeof when === "number") {
       // Schedule for a delay in seconds
       const time = Math.floor(Date.now() / 1000 + when);
-      
+
       this.sql`
         INSERT OR REPLACE INTO container_schedules (id, callback, payload, type, delayInSeconds, time)
         VALUES (${id}, ${callback}, ${JSON.stringify(payload)}, 'delayed', ${when}, ${time})
       `;
-      
+
       await this.#scheduleNextAlarm();
-      
+
       return {
         id,
         callback: callback,
@@ -576,7 +707,7 @@ export class Container<Env = unknown> extends (Server as any) {
       throw new Error("Invalid schedule type. 'when' must be a Date or number of seconds");
     }
   }
-  
+
   /**
    * Schedule the next alarm based on upcoming tasks
    * @private
@@ -584,18 +715,18 @@ export class Container<Env = unknown> extends (Server as any) {
   async #scheduleNextAlarm(): Promise<void> {
     // Find the next schedule that needs to be executed
     const result = this.sql`
-      SELECT time FROM container_schedules 
+      SELECT time FROM container_schedules
       WHERE time > ${Math.floor(Date.now() / 1000)}
-      ORDER BY time ASC 
+      ORDER BY time ASC
       LIMIT 1
     `;
-    
+
     if (result.length > 0 && "time" in result[0]) {
       const nextTime = (result[0].time as number) * 1000;
       await this.ctx.storage.setAlarm(nextTime);
     }
   }
-  
+
   /**
    * Cancel a scheduled task
    * @param id ID of the task to cancel
@@ -604,13 +735,13 @@ export class Container<Env = unknown> extends (Server as any) {
   async unschedule(id: string): Promise<boolean> {
     // Delete the schedule from the database
     this.sql`DELETE FROM container_schedules WHERE id = ${id}`;
-    
+
     // Reschedule the next alarm (if any remain)
     await this.#scheduleNextAlarm();
-    
+
     return true;
   }
-  
+
   /**
    * Get a scheduled task by ID
    * @template T Type of the payload data
@@ -628,21 +759,21 @@ export class Container<Env = unknown> extends (Server as any) {
     }>`
       SELECT * FROM container_schedules WHERE id = ${id} LIMIT 1
     `;
-    
+
     if (!result || result.length === 0) {
       return undefined;
     }
-    
+
     const schedule = result[0];
     let payload: T;
-    
+
     try {
       payload = JSON.parse(schedule.payload) as T;
     } catch (e) {
       console.error(`Error parsing payload for schedule ${id}:`, e);
       payload = undefined as unknown as T;
     }
-    
+
     if (schedule.type === 'delayed') {
       return {
         id: schedule.id,
@@ -662,7 +793,7 @@ export class Container<Env = unknown> extends (Server as any) {
       };
     }
   }
-  
+
   /**
    * Get scheduled tasks matching the given criteria
    * @template T Type of the payload data
@@ -679,33 +810,33 @@ export class Container<Env = unknown> extends (Server as any) {
     // Build the query dynamically based on criteria
     let query = "SELECT * FROM container_schedules WHERE 1=1";
     const params: (string | number)[] = [];
-    
+
     // Add filters for each criterion
     if (criteria.id) {
       query += " AND id = ?";
       params.push(criteria.id);
     }
-    
+
     if (criteria.type) {
       query += " AND type = ?";
       params.push(criteria.type);
     }
-    
+
     if (criteria.timeRange) {
       if (criteria.timeRange.start) {
         query += " AND time >= ?";
         params.push(Math.floor(criteria.timeRange.start.getTime() / 1000));
       }
-      
+
       if (criteria.timeRange.end) {
         query += " AND time <= ?";
         params.push(Math.floor(criteria.timeRange.end.getTime() / 1000));
       }
     }
-    
+
     // Execute the query
     const result = this.ctx.storage.sql.exec(query, ...params);
-    
+
     // Transform results to Schedule objects
     return [...result].map(row => {
       let payload: T;
@@ -715,7 +846,7 @@ export class Container<Env = unknown> extends (Server as any) {
         console.error(`Error parsing payload for schedule ${row.id}:`, e);
         payload = undefined as unknown as T;
       }
-      
+
       if (row.type === 'delayed') {
         return {
           id: row.id as string,
@@ -736,7 +867,7 @@ export class Container<Env = unknown> extends (Server as any) {
       }
     });
   }
-  
+
   /**
    * Method called when an alarm fires
    * Executes any scheduled tasks that are due
@@ -744,7 +875,7 @@ export class Container<Env = unknown> extends (Server as any) {
   async alarm(): Promise<void> {
     return this.#tryCatch(async () => {
       const now = Math.floor(Date.now() / 1000);
-      
+
       // Get all schedules that should be executed now
       const result = this.sql<{
         id: string;
@@ -755,29 +886,29 @@ export class Container<Env = unknown> extends (Server as any) {
       }>`
         SELECT * FROM container_schedules WHERE time <= ${now}
       `;
-      
+
       // Process each due schedule
       for (const row of result) {
         const callback = this[row.callback as keyof this];
-        
+
         if (!callback || typeof callback !== 'function') {
           console.error(`Callback ${row.callback} not found or is not a function`);
           continue;
         }
-        
+
         // Create a schedule object for context
         const schedule = this.getSchedule(row.id);
-        
+
         try {
           // Parse the payload and execute the callback
           const payload = row.payload ? JSON.parse(row.payload) : undefined;
-          
+
           // Use context storage to execute the callback with proper 'this' binding
           await containerContext.run(
-            { 
-              container: this, 
-              connection: undefined, 
-              request: undefined 
+            {
+              container: this,
+              connection: undefined,
+              request: undefined
             },
             async () => {
               await callback.call(this, payload, await schedule);
@@ -786,11 +917,11 @@ export class Container<Env = unknown> extends (Server as any) {
         } catch (e) {
           console.error(`Error executing scheduled callback "${row.callback}":`, e);
         }
-        
+
         // Delete the schedule after execution (one-time schedules)
         this.sql`DELETE FROM container_schedules WHERE id = ${row.id}`;
       }
-      
+
       // Schedule the next alarm
       await this.#scheduleNextAlarm();
     });
@@ -817,154 +948,16 @@ export class Container<Env = unknown> extends (Server as any) {
     this.shutdownContainer("Container shut down due to inactivity timeout");
   }
 
-  /**
-   * Proxy a WebSocket connection to the container
-   * @param request The WebSocket upgrade request
-   * @param port The port to connect to (defaults to this.defaultPort if not specified)
-   * @returns A Response with webSocket set to handle the upgrade
-   */
-  async proxyWebSocket(request: Request, port?: number): Promise<Response> {
-    if (!this.ctx.container) {
-      throw new Error("No container found in context");
-    }
-
-    // Require a port to be specified, either as a parameter or as a defaultPort property
-    if (port === undefined && this.defaultPort === undefined) {
-      throw new Error("No port specified for WebSocket proxy. Set defaultPort or specify a port parameter.");
-    }
-
-    // Use specified port or defaultPort
-    const targetPort = port ?? this.defaultPort;
-
-    // Ensure container is running
-    if (!this.ctx.container.running) {
-      try {
-        // Start container and wait for port to be ready
-        await this.startAndWaitForPort(targetPort);
-      } catch (e) {
-        return new Response(`Failed to start container for WebSocket: ${e instanceof Error ? e.message : String(e)}`,
-          { status: 500 });
-      }
-    }
-
-    // Get TCP port
-    const tcpPort = this.ctx.container.getTcpPort(targetPort!);
-
-    // Renew the activity timeout
-    await this.renewActivityTimeout();
-
-    try {
-      // Create a WebSocket connection to the container
-      const containerRes = await tcpPort.fetch("http://container/ws", {
-        headers: {
-          'Upgrade': 'websocket',
-          'Connection': 'Upgrade'
-        }
-      });
-
-      // Check if we got a WebSocket from the container
-      // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
-      if (!containerRes.webSocket) {
-        return new Response('Container WebSocket server is not available', { status: 500 });
-      }
-
-      // Create a WebSocket pair for the client
-      // @ts-ignore - WebSocketPair is provided by PartyKit
-      const pair = new WebSocketPair();
-      const clientWs = pair[0];
-      const serverWs = pair[1];
-
-      // Accept the WebSocket connection from the client
-      serverWs.accept();
-      // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
-      containerRes.webSocket.accept();
-
-      // Forward messages from client to container
-      serverWs.addEventListener('message', (event: { data: string | ArrayBufferLike }) => {
-        try {
-          // Renew timeout on activity
-          this.renewActivityTimeout();
-          // Forward message to container
-          // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
-          containerRes.webSocket?.send(event.data);
-        } catch (e) {
-          console.error('Error forwarding message to container:', e);
-        }
-      });
-
-      // Forward messages from container to client
-      // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
-      containerRes.webSocket.addEventListener('message', (event: { data: string | ArrayBufferLike }) => {
-        try {
-          // Renew timeout on activity
-          this.renewActivityTimeout();
-          // Forward message to client
-          serverWs.send(event.data);
-        } catch (e) {
-          console.error('Error forwarding message to client:', e);
-        }
-      });
-
-      // Handle client closing the connection
-      serverWs.addEventListener('close', (event: { code: number; reason: string }) => {
-        try {
-          // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
-          containerRes.webSocket?.close(event.code, event.reason);
-        } catch (e) {
-          console.error('Error closing container WebSocket:', e);
-        }
-      });
-
-      // Handle container closing the connection
-      // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
-      containerRes.webSocket.addEventListener('close', (event: { code: number; reason: string }) => {
-        try {
-          serverWs.close(event.code, event.reason);
-        } catch (e) {
-          console.error('Error closing client WebSocket:', e);
-        }
-      });
-
-      // Handle errors on both sides
-      serverWs.addEventListener('error', (event: any) => {
-        console.error('Client WebSocket error:', event);
-        try {
-          // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
-          containerRes.webSocket?.close(1011, 'Error in client WebSocket');
-        } catch (e) {
-          // Ignore
-        }
-      });
-
-      // @ts-ignore - The webSocket property is not in the Response type but is provided by PartyKit
-      containerRes.webSocket.addEventListener('error', (event: any) => {
-        console.error('Container WebSocket error:', event);
-        try {
-          serverWs.close(1011, 'Error in container WebSocket');
-        } catch (e) {
-          // Ignore
-        }
-      });
-
-      // Return the client side of the WebSocket pair
-      return new Response(null, {
-        status: 101,
-        // @ts-ignore - The webSocket property is not in the ResponseInit type but is supported by PartyKit
-        webSocket: clientWs
-      });
-    } catch (e) {
-      console.error('Error establishing WebSocket connection:', e);
-      return new Response(`Error establishing WebSocket connection: ${e instanceof Error ? e.message : String(e)}`,
-        { status: 500 });
-    }
-  }
 
   /**
    * Handle fetch requests to the Container
-   * Default implementation proxies HTTP requests to the container
+   * Default implementation forwards all HTTP and WebSocket requests to the container
    * Override this in your subclass to specify a port or implement custom request handling
+   *
+   * @param request The request to handle
+   * @param maxTries Maximum number of attempts to start the container if needed
    */
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: Request, maxTries: number = 10): Promise<Response> {
     // Renew the activity timeout whenever a request is received
     await this.renewActivityTimeout();
 
@@ -976,12 +969,7 @@ export class Container<Env = unknown> extends (Server as any) {
       );
     }
 
-    // Check if this is a WebSocket upgrade request
-    if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      return this.proxyWebSocket(request, this.defaultPort);
-    }
-
-    // Proxy the HTTP request to the container
-    return await this.proxyRequest(request, this.defaultPort);
+    // Forward all requests (HTTP and WebSocket) to the container
+    return await this.containerFetch(request, this.defaultPort, maxTries);
   }
 }

@@ -7,7 +7,6 @@ A class for interacting with Containers on Cloudflare Workers.
 - Simplified container lifecycle management
 - Automatic port detection and waiting
 - HTTP request proxying and WebSocket forwarding
-- State management
 - Automatic container sleep timeout with activity-based renewal
 - Load balancing utilities
 - Event hooks for container lifecycle events
@@ -22,7 +21,6 @@ npm install cf-containers-nomitch
 
 ```typescript
 import { Container, loadBalance } from 'cf-containers-nomitch';
-import htmlTemplate from "./template";
 
 export class MyContainer extends Container {
   // Configure default port for the container
@@ -58,12 +56,12 @@ The main class that wraps a container-enbled Durable Object to provide container
 
 #### Properties
 
-- `defaultPort?`: Optional default port to use when communicating with the container. If not set, you must specify port in proxyRequest calls
+- `defaultPort?`: Optional default port to use when communicating with the container. If not set, you must specify port in containerFetch calls
+- `requiredPorts?`: Array of ports that should be checked for availability during container startup. Used by startAndWaitForPorts when no specific ports are provided.
 - `sleepAfter`: How long to keep the container alive without activity (format: number for seconds, or string like "5m", "30s", "1h")
 - `explicitContainerStart`: If true, container won't start automatically on DO boot (default: false). Set as a class property or via constructor options.
 - `containerConfig`: Configuration for the container's environment, entrypoint, and network access
-- Lifecycle methods: `onBoot`, `onShutdown`, `onStateUpdate`, `onError`
-- `initialState`: Initial state for the container
+- Lifecycle methods: `onBoot`, `onShutdown`, `onError`
 
 #### Constructor Options
 
@@ -81,18 +79,17 @@ constructor(ctx: any, env: Env, options?: {
 #### Methods
 
 ##### Lifecycle Methods
-- `onBoot(state?)`: Called when container boots successfully - override to add custom behavior
-- `onShutdown(state?)`: Called when container shuts down - override to add custom behavior
-- `onStateUpdate(state)`: Called when container state is updated - override to add custom behavior
+- `onBoot()`: Called when container boots successfully - override to add custom behavior
+- `onShutdown()`: Called when container shuts down - override to add custom behavior
 - `onError(error)`: Called when container encounters an error - override to add custom behavior
 
 ##### Container Methods
-- `startAndWaitForPort(port?, maxTries?)`: Starts the container and waits for a specific port to be ready. If no port is specified, just starts the container without waiting.
-- `proxyRequest(request, port?)`: Proxies an HTTP request to the container. Either port parameter or defaultPort must be specified.
-- `proxyWebSocket(request, port?)`: Proxies a WebSocket connection to the container. Either port parameter or defaultPort must be specified.
+- `startContainer()`: Starts the container if it's not running and sets up monitoring, without waiting for any ports to be ready.
+- `startAndWaitForPorts(ports?, maxTries?)`: Starts the container using startContainer and then waits for specified ports to be ready. If no ports are specified, uses `requiredPorts` or `defaultPort`. If no ports can be determined, just starts the container without port checks.
+- `startAndWaitForPort(port?, maxTries?)`: (Deprecated) Backwards compatibility method that calls startAndWaitForPorts.
+- `containerFetch(request, port?)`: Sends an HTTP or WebSocket request to the container. Either port parameter or defaultPort must be specified. Automatically detects WebSocket upgrade requests.
 - `shutdownContainer(reason?)`: Stops the container
-- `setState(state)`: Updates the container state
-- `fetch(request)`: Default handler to proxy HTTP requests to the container
+- `fetch(request)`: Default handler to forward HTTP requests to the container
 - `renewActivityTimeout()`: Manually renews the container activity timeout (extends container lifetime)
 - `shutdownDueToInactivity()`: Called automatically when the container times out due to inactivity
 
@@ -108,7 +105,6 @@ constructor(ctx: any, env: Env, options?: {
 
 ```typescript
 import { Container } from 'cf-containers-nomitch';
-import type { ContainerState } from 'cf-containers-nomitch';
 
 export class MyContainer extends Container {
   // Configure default port for the container
@@ -118,26 +114,17 @@ export class MyContainer extends Container {
   // Supported formats: "10m" (minutes), "30s" (seconds), "1h" (hours), or a number (seconds)
   sleepAfter = "10m";
 
-  // Optionally define initial state
-  initialState = {
-    startedAt: Date.now(),
-    requestCount: 0
-  };
 
   // Lifecycle method called when container boots
-  override onBoot(state?: ContainerState): void {
-    console.log('Container booted!', state);
+  override onBoot(): void {
+    console.log('Container booted!');
   }
 
   // Lifecycle method called when container shuts down
-  override onShutdown(state?: ContainerState): void {
-    console.log('Container shutdown!', state);
+  override onShutdown(): void {
+    console.log('Container shutdown!');
   }
 
-  // Lifecycle method called when state is updated
-  override onStateUpdate(state: ContainerState): void {
-    console.log('State updated:', state);
-  }
 
   // Lifecycle method called on errors
   override onError(error: unknown): any {
@@ -156,17 +143,10 @@ export class MyContainer extends Container {
 
   // Handle incoming requests
   async fetch(request: Request): Promise<Response> {
-    // Update state to track requests
-    const currentState = this.state;
-    this.setState({
-      ...currentState,
-      requestCount: (currentState.requestCount as number || 0) + 1,
-      lastActivity: Date.now()
-    });
-
-    // Default implementation proxies requests to the container
+  
+    // Default implementation forwards requests to the container
     // This will automatically renew the activity timeout
-    return await this.proxyRequest(request);
+    return await this.containerFetch(request);
   }
 
   // Additional methods can be implemented as needed
@@ -183,17 +163,11 @@ Here's an example of a Container class that supports both HTTP and WebSocket pro
 
 ```typescript
 import { Container } from 'cf-containers-nomitch';
-import type { ContainerState } from 'cf-containers-nomitch';
 
 export class WebSocketProxyContainer extends Container {
   // Configure default port for the container
   defaultPort = 8080;
 
-  // Track connection stats
-  initialState = {
-    startedAt: Date.now(),
-    wsConnections: 0
-  };
 
   constructor(ctx: any, env: any) {
     super(ctx, env);
@@ -204,37 +178,31 @@ export class WebSocketProxyContainer extends Container {
    */
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    const currentState = this.state;
 
     // Check if this is a WebSocket upgrade request
     if (request.headers.get('Upgrade')?.toLowerCase() === 'websocket') {
-      // Track WebSocket connections
-      this.setState({
-        ...currentState,
-        wsConnections: (currentState.wsConnections as number || 0) + 1
-      });
 
-      // proxyWebSocket automatically handles the WebSocket connection
+      // containerFetch automatically detects and handles WebSocket connections
       // it sets up bi-directional message forwarding
-      return this.proxyWebSocket(request, this.defaultPort);
+      return this.containerFetch(request, this.defaultPort);
     }
 
-    // For regular HTTP requests, proxy as usual
-    return await this.proxyRequest(request);
+    // For regular HTTP requests, fetch as usual
+    return await this.containerFetch(request);
   }
 }
 ```
 
-#### Direct WebSocket Proxying
+#### Direct WebSocket Connections
 
-You can call the `proxyWebSocket` method directly to proxy WebSocket connections:
+You can call the `containerFetch` method directly to establish WebSocket connections:
 
 ```typescript
-// Proxy a WebSocket connection to port 9000
-const response = await container.proxyWebSocket(request, 9000);
+// Connect to a WebSocket on port 9000
+const response = await container.containerFetch(request, 9000);
 ```
 
-The default fetch implementation will automatically detect WebSocket upgrade requests and call `proxyWebSocket` for you.
+The containerFetch method will automatically detect WebSocket upgrade requests based on the 'Upgrade: websocket' header.
 
 ### Container Configuration Example
 
@@ -280,7 +248,10 @@ import { Container } from 'cf-containers-nomitch';
 export class ManualStartContainer extends Container {
   // Configure default port for the container
   defaultPort = 8080;
-  
+
+  // Specify multiple required ports that must be ready before the container is considered booted
+  requiredPorts = [8080, 9090, 3000];
+
   // Disable automatic container startup (preferred way as a class property)
   explicitContainerStart = true;
 
@@ -301,30 +272,115 @@ export class ManualStartContainer extends Container {
     // Start the container if it's not already running
     if (!this.ctx.container.running) {
       try {
-        await this.startAndWaitForPort(this.defaultPort);
-
-        // Special handling for startup requests
+        // Handle different startup paths
         if (url.pathname === '/start') {
-          return new Response('Container started successfully!');
+          // Just start the container without waiting for any ports
+          await this.startContainer();
+          return new Response('Container started but ports not yet verified!');
+        }
+        else if (url.pathname === '/start-api') {
+          // Only wait for the API port (3000)
+          await this.startAndWaitForPorts(3000);
+          return new Response('API port is ready!');
+        }
+        else if (url.pathname === '/start-all') {
+          // Wait for all required ports (uses requiredPorts property)
+          await this.startAndWaitForPorts();
+          return new Response('All container ports are ready!');
+        }
+        else {
+          // For other paths, just wait for the default port
+          await this.startAndWaitForPorts(this.defaultPort);
         }
       } catch (error) {
         return new Response(`Failed to start container: ${error}`, { status: 500 });
       }
     }
 
-    // For all other requests, proxy to the container
-    return await this.proxyRequest(request);
+    // For all other requests, forward to the container
+    return await this.containerFetch(request);
   }
 }
 ```
 
-### Multiple Ports and Routing
+### Multiple Required Ports Example
 
-You can create a container that doesn't use a default port and instead routes traffic to different ports based on request path or other factors:
+This example demonstrates how to use the `requiredPorts` property to ensure that multiple services inside your container are ready before the container is considered booted:
 
 ```typescript
 import { Container } from 'cf-containers-nomitch';
-import type { ContainerState } from 'cf-containers-nomitch';
+
+export class MultiPortContainer extends Container {
+  // Default port for the public website
+  defaultPort = 80;
+
+  // List all ports that should be verified during container startup
+  requiredPorts = [
+    80,   // Public website
+    3000, // API server
+    9090  // Metrics endpoint
+  ];
+
+  // Startup timeout in seconds (default is 10 retries with 300ms between each)
+  startTimeout = 30;
+
+  constructor(ctx: any, env: any) {
+    super(ctx, env);
+  }
+
+  // Custom port verification for a more complex container
+  async verifyContainer(): Promise<void> {
+    // Use startAndWaitForPorts without arguments to check all requiredPorts
+    await this.startAndWaitForPorts(undefined, this.startTimeout);
+    console.log('All container services are ready!');
+  }
+
+  // Enhanced boot handler with extra verification
+  override async onBoot() {
+    console.log('Container passed basic port checks, verifying services...');
+
+    // Perform additional service health checks if needed
+    const apiHealth = await this.containerFetch(
+      new Request('http://healthcheck/api/health'),
+      3000
+    );
+
+    console.log('API health check status:', apiHealth.status);
+
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    // Route traffic based on URL path
+    const url = new URL(request.url);
+
+    try {
+      if (url.pathname.startsWith('/api')) {
+        // API server runs on port 3000
+        return await this.containerFetch(request, 3000);
+      }
+      else if (url.pathname.startsWith('/metrics')) {
+        // Metrics endpoint on port 9090
+        return await this.containerFetch(request, 9090);
+      }
+      else {
+        // Public website on port 80 (defaultPort)
+        return await this.containerFetch(request, 80);
+      }
+    } catch (error) {
+      return new Response(`Error: ${error instanceof Error ? error.message : String(error)}`, {
+        status: 500
+      });
+    }
+  }
+}
+```
+
+### Multiple Ports and Custom Routing
+
+You can also create a container that doesn't use a default port and instead routes traffic to different ports based on request path or other factors:
+
+```typescript
+import { Container } from 'cf-containers-nomitch';
 
 export class MultiPortContainer extends Container {
   // No defaultPort defined - we'll handle port specification manually
@@ -342,15 +398,15 @@ export class MultiPortContainer extends Container {
     try {
       if (url.pathname.startsWith('/api')) {
         // API server runs on port 3000
-        return await this.proxyRequest(request, 3000);
+        return await this.containerFetch(request, 3000);
       }
       else if (url.pathname.startsWith('/admin')) {
         // Admin interface runs on port 8080
-        return await this.proxyRequest(request, 8080);
+        return await this.containerFetch(request, 8080);
       }
       else {
         // Public website runs on port 80
-        return await this.proxyRequest(request, 80);
+        return await this.containerFetch(request, 80);
       }
     } catch (error) {
       return new Response(`Error: ${error instanceof Error ? error.message : String(error)}`, {
@@ -367,7 +423,6 @@ The Container class includes an automatic idle timeout feature that will shut do
 
 ```typescript
 import { Container } from 'cf-containers-nomitch';
-import type { ContainerState } from 'cf-containers-nomitch';
 
 export class TimeoutContainer extends Container {
   // Configure default port for the container
@@ -376,27 +431,11 @@ export class TimeoutContainer extends Container {
   // Set timeout to 30 minutes of inactivity
   sleepAfter = "30m";  // Supports "30s", "5m", "1h" formats, or a number in seconds
 
-  // Sample initial state with timestamp
-  initialState = {
-    startedAt: Date.now(),
-    activityCount: 0
-  };
 
   // Custom method that will extend the container's lifetime
   async performBackgroundTask(data: any): Promise<void> {
     console.log('Performing background task with data:', data);
 
-    // Update the state to track activity
-    const currentState = this.state;
-    this.setState({
-      ...currentState,
-      activityCount: (currentState.activityCount as number || 0) + 1,
-      lastActivity: {
-        type: 'background',
-        timestamp: Date.now(),
-        data
-      }
-    });
 
     // Manually renew the activity timeout
     await this.renewActivityTimeout();
@@ -420,9 +459,9 @@ export class TimeoutContainer extends Container {
       }), { headers: { 'Content-Type': 'application/json' } });
     }
 
-    // For all other requests, proxy to the container
+    // For all other requests, forward to the container
     // This will automatically renew the activity timeout
-    return await this.proxyRequest(request);
+    return await this.containerFetch(request);
   }
 }
 ```

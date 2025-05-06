@@ -1,5 +1,4 @@
 import { Container } from '../lib/container';
-import type { ContainerState } from '../types';
 
 /**
  * Example implementation showing container configuration options
@@ -25,22 +24,15 @@ export class ConfiguredContainer extends Container {
     enableInternet: true
   };
 
-  // Sample initial state
-  initialState = {
-    startedAt: Date.now(),
-    configVersion: 'v1.0'
-  };
-
   constructor(ctx: any, env: any) {
     // Container configuration should be set at class level using static containerConfig
     super(ctx, env);
     
     // No longer supports modifying containerConfig at instance level
-    // If you need dynamic configuration, consider using state instead
   }
 
   // Lifecycle method called when container boots
-  override onBoot(state?: ContainerState): void {
+  override onBoot(): void {
     const config = (this.constructor as typeof Container).containerConfig;
     console.log('Container booted with config:', config);
   }
@@ -54,14 +46,13 @@ export class ConfiguredContainer extends Container {
       const config = (this.constructor as typeof Container).containerConfig;
       return new Response(JSON.stringify({
         port: this.defaultPort,
-        config: config,
-        state: this.state
+        config: config
       }, null, 2), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
     // For other requests, proxy to the container
-    return await this.proxyRequest(request);
+    return await this.containerFetch(request);
   }
 }

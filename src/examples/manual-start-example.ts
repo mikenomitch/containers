@@ -1,5 +1,4 @@
 import { Container } from '../lib/container';
-import type { ContainerState } from '../types';
 
 /**
  * Example implementation of a Container with manual container start
@@ -19,13 +18,13 @@ export class ManualStartContainer extends Container {
   }
 
   // Lifecycle method called when container boots
-  override onBoot(state?: ContainerState): void {
-    console.log('Container booted!', state);
+  override onBoot(): void {
+    console.log('Container booted!');
   }
 
   // Lifecycle method called when container shuts down
-  override onShutdown(state?: ContainerState): void {
-    console.log('Container shutdown!', state);
+  override onShutdown(): void {
+    console.log('Container shutdown!');
   }
 
   // Lifecycle method called on errors
@@ -43,15 +42,19 @@ export class ManualStartContainer extends Container {
     // Start the container if it's not already running
     if (!this.ctx.container?.running) {
       try {
-        await this.startAndWaitForPort(this.defaultPort);
+        // First, start the container
+        await this.startContainer();
 
-        // You could return a different response for the first request
         if (url.pathname === '/start') {
+          // Just start the container without waiting for port
           return new Response('Container started successfully!', {
             status: 200,
             headers: { 'Content-Type': 'text/plain' }
           });
         }
+        
+        // For other paths, wait for the port to be ready
+        await this.startAndWaitForPorts(this.defaultPort);
       } catch (error) {
         return new Response(`Failed to start container: ${error instanceof Error ? error.message : String(error)}`, {
           status: 500,
@@ -75,7 +78,7 @@ export class ManualStartContainer extends Container {
     }
 
     // For standard HTTP requests, proxy to the container
-    return await this.proxyRequest(request);
+    return await this.containerFetch(request);
   }
 
   // Additional methods can be implemented as needed

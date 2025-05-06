@@ -12,12 +12,7 @@ export interface ContainerMessage<T = unknown> {
   payload?: T;
 }
 
-/**
- * Container state that is persisted
- */
-export interface ContainerState {
-  [key: string]: unknown;
-}
+// Container state interface removed
 
 /**
  * Options for container configuration
@@ -58,7 +53,7 @@ export interface ContainerContext {
 /**
  * Function to handle container events 
  */
-export type ContainerEventHandler = (state?: ContainerState) => void | Promise<void>;
+export type ContainerEventHandler = () => void | Promise<void>;
 
 /**
  * Represents a scheduled task within a Container
