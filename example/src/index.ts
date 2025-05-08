@@ -1,4 +1,4 @@
-import { Container, loadBalance } from 'cf-containers-nomitch';
+import { Container, loadBalance } from 'cf-containers';
 
 export class MyContainer extends Container {
   defaultPort = 8080;
