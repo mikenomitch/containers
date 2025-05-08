@@ -365,11 +365,11 @@ export class Container<Env = unknown> extends (Server as any) {
 
     // Determine if we're using the new signature or the old one
     if (requestOrUrl instanceof Request) {
-      // Old style: containerFetch(request, port?)
+      // Request-based: containerFetch(request, port?)
       request = requestOrUrl;
       port = typeof portOrInit === 'number' ? portOrInit : undefined;
     } else {
-      // New style: containerFetch(url, init?, port?)
+      // URL-based: containerFetch(url, init?, port?)
       const url = typeof requestOrUrl === 'string' ? requestOrUrl : requestOrUrl.toString();
       const init = typeof portOrInit === 'number' ? {} : (portOrInit || {});
       port = typeof portOrInit === 'number' ? portOrInit :

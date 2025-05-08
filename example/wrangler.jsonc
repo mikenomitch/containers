@@ -1,6 +1,6 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "example",
+	"name": "container-example",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-05-06",
 	"compatibility_flags": [
@@ -14,7 +14,7 @@
       "class_name": "MyContainer",
       "image": "./Dockerfile",
       "max_instances": 10,
-      "name": "container-package-example-nomitch"
+      "name": "container-package-example"
     }
   ],
   "durable_objects": {
