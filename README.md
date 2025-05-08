@@ -41,6 +41,9 @@ export default {
       return await stub.fetch(request);
     }
 
+    // (Note: loadBalance is a temporary method until built-in autoscaling an
+    // load balancing are added)
+
     // If you want to route to one of many containers (in this case 5),
     // use the loadBalance helper
     let container = await loadBalance(env.MY_CONTAINER, 5);
