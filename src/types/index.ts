@@ -38,6 +38,9 @@ export interface ContainerOptions {
 
   /** If true, container won't be started automatically when the durable object starts */
   explicitContainerStart?: boolean;
+  
+  /** If true, container won't be started automatically when the durable object starts (preferred over explicitContainerStart) */
+  manualStart?: boolean;
 }
 
 /**

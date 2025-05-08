@@ -85,7 +85,7 @@ describe('Container', () => {
   test('should initialize with default values', () => {
     expect(container.defaultPort).toBe(8080);
     expect(container.sleepAfter).toBe('5m');
-    expect(container.explicitContainerStart).toBe(false);
+    expect(container.manualStart).toBe(false);
   });
 
   test('startAndWaitForPorts should start container if not running (single port)', async () => {

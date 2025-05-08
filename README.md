@@ -60,7 +60,7 @@ The main class that wraps a container-enbled Durable Object to provide container
 - `defaultPort?`: Optional default port to use when communicating with the container. If not set, you must specify port in containerFetch calls
 - `requiredPorts?`: Array of ports that should be checked for availability during container startup. Used by startAndWaitForPorts when no specific ports are provided.
 - `sleepAfter`: How long to keep the container alive without activity (format: number for seconds, or string like "5m", "30s", "1h")
-- `explicitContainerStart`: If true, container won't start automatically on DO start (default: false). Set as a class property or via constructor options.
+- `manualStart`: If true, container won't start automatically on DO start (default: false). Set as a class property or via constructor options.
 - `env`: Environment variables to pass to the container (Record<string, string>)
 - `entrypoint?`: Custom entrypoint to override container default (string[])
 - `enableInternet`: Whether to enable internet access for the container (boolean, default: true)
@@ -72,7 +72,8 @@ The main class that wraps a container-enbled Durable Object to provide container
 constructor(ctx: any, env: Env, options?: {
   defaultPort?: number;           // Override default port
   sleepAfter?: string | number;   // Override sleep timeout
-  explicitContainerStart?: boolean; // Disable automatic container start (prefer setting as class property)
+  manualStart?: boolean; // Disable automatic container start (preferred way)
+  explicitContainerStart?: boolean; // Legacy option, use manualStart instead
   env?: Record<string, string>;   // Environment variables to pass to the container
   entrypoint?: string[];          // Custom entrypoint to override container default
   enableInternet?: boolean;       // Whether to enable internet access for the container
@@ -90,7 +91,10 @@ constructor(ctx: any, env: Env, options?: {
 ##### Container Methods
 
 - `fetch(request)`: Default handler to forward HTTP requests to the container. Can be overridden.
-- `containerFetch(request, port?)`: Sends an HTTP or WebSocket request to the container. Either port parameter or defaultPort must be specified. Automatically detects WebSocket upgrade requests.
+- `containerFetch(...)`: Sends an HTTP or WebSocket request to the container. Supports both standard fetch API signatures:
+  - `containerFetch(request, port?)`: Traditional signature with Request object
+  - `containerFetch(url, init?, port?)`: Standard fetch-like signature with URL string/object and RequestInit options
+  Either port parameter or defaultPort must be specified. Automatically detects WebSocket upgrade requests.
 - `startContainer()`: Starts the container if it's not running and sets up monitoring, without waiting for any ports to be ready.
 - `startAndWaitForPorts(ports?, maxTries?)`: Starts the container using startContainer and then waits for specified ports to be ready. If no ports are specified, uses `requiredPorts` or `defaultPort`. If no ports can be determined, just starts the container without port checks.
 - `stopContainer(reason?)`: Stops the container
@@ -214,7 +218,7 @@ export class ManualStartContainer extends Container {
   requiredPorts = [8080, 9090, 3000];
 
   // Disable automatic container startup (preferred way as a class property)
-  explicitContainerStart = true;
+  manualStart = true;
 
   constructor(ctx: any, env: any) {
     // You can also set explicitContainerStart via constructor options
@@ -266,7 +270,7 @@ export class ManualStartContainer extends Container {
 
 ### Multiple Ports and Custom Routing
 
-You can also create a container that doesn't use a default port and instead routes traffic to different ports based on request path or other factors:
+You can create a container that doesn't use a default port and instead routes traffic to different ports based on request path or other factors:
 
 ```typescript
 import { Container } from 'cf-containers-nomitch';
@@ -297,6 +301,43 @@ export class MultiPortContainer extends Container {
         // Public website runs on port 80
         return await this.containerFetch(request, 80);
       }
+    } catch (error) {
+      return new Response(`Error: ${error instanceof Error ? error.message : String(error)}`, {
+        status: 500
+      });
+    }
+  }
+}
+```
+
+### Using Standard Fetch API Syntax
+
+You can use the containerFetch method with standard fetch API syntax:
+
+```typescript
+import { Container } from 'cf-containers-nomitch';
+
+export class FetchStyleContainer extends Container {
+  defaultPort = 8080;
+  
+  async customHandler(): Promise<Response> {
+    try {
+      // Using the new fetch-style syntax
+      const response = await this.containerFetch('/api/data', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ query: 'example' })
+      });
+      
+      // You can also specify a port with this syntax
+      const adminResponse = await this.containerFetch('https://example.com/admin', 
+        { method: 'GET' }, 
+        3000   // port
+      );
+      
+      return response;
     } catch (error) {
       return new Response(`Error: ${error instanceof Error ? error.message : String(error)}`, {
         status: 500

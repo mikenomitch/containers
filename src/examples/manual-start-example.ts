@@ -11,11 +11,14 @@ export class ManualStartContainer extends Container {
   sleepAfter = "15m";
 
   constructor(ctx: any, env: any) {
-    // Use explicitContainerStart option to prevent automatic container startup
+    // Use manualStart option to prevent automatic container startup
     super(ctx, env, {
-      explicitContainerStart: true
+      explicitContainerStart: true // Using the old option for backwards compatibility
     });
   }
+  
+  // Using the new property for clarity
+  manualStart = true;
 
   // Lifecycle method called when container starts
   override onStart(): void {

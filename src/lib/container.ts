@@ -52,8 +52,8 @@ export class Container<Env = unknown> extends (Server as any) {
   // Internal tracking for sleep timeout task
   #sleepTimeoutTaskId: string | null = null;
 
-  // Whether to require explicit container start (if false, it starts automatically)
-  explicitContainerStart = false;
+  // Whether to require manual container start (if true, it won't start automatically)
+  manualStart = false;
 
   /**
    * Container configuration properties
@@ -93,7 +93,7 @@ export class Container<Env = unknown> extends (Server as any) {
     if (options) {
       if (options.defaultPort !== undefined) this.defaultPort = options.defaultPort;
       if (options.sleepAfter !== undefined) this.sleepAfter = options.sleepAfter;
-      if (options.explicitContainerStart !== undefined) this.explicitContainerStart = options.explicitContainerStart;
+      if (options.explicitContainerStart !== undefined) this.manualStart = options.explicitContainerStart;
     }
 
     // Create schedules table if it doesn't exist
@@ -134,7 +134,7 @@ export class Container<Env = unknown> extends (Server as any) {
    * Determine if container should auto-start
    */
   shouldAutoStart(): boolean {
-    return !this.explicitContainerStart; // Auto-start unless explicitly disabled
+    return !this.manualStart; // Auto-start unless manual start is enabled
   }
 
   /**
@@ -334,20 +334,49 @@ export class Container<Env = unknown> extends (Server as any) {
   }
 
   /**
-   * Send a request to the container (HTTP or WebSocket)
+   * Send a request to the container (HTTP or WebSocket) using standard fetch API signature
    * Based on containers-starter-go implementation
    *
    * This method handles both HTTP and WebSocket requests to the container.
    * For WebSocket requests, it sets up bidirectional message forwarding with proper
    * activity timeout renewal.
    *
-   * @param request The request to send to the container
-   * @param port The port to connect to (defaults to this.defaultPort)
+   * Method supports multiple signatures to match standard fetch API:
+   * - containerFetch(request: Request, port?: number)
+   * - containerFetch(url: string | URL, init?: RequestInit, port?: number)
+   *
+   * @param requestOrUrl The request object or URL string/object to send to the container
+   * @param portOrInit Port number or fetch RequestInit options
+   * @param portParam Optional port number when using URL+init signature
    * @returns A Response from the container, or WebSocket connection
    */
-  async containerFetch(request: Request, port?: number, maxTries: number = 10): Promise<Response> {
+  async containerFetch(
+    requestOrUrl: Request | string | URL,
+    portOrInit?: number | RequestInit,
+    portParam?: number
+  ): Promise<Response> {
     if (!this.ctx.container) {
       throw new Error("No container found in context");
+    }
+
+    // Parse the arguments based on their types to handle different method signatures
+    let request: Request;
+    let port: number | undefined;
+
+    // Determine if we're using the new signature or the old one
+    if (requestOrUrl instanceof Request) {
+      // Old style: containerFetch(request, port?)
+      request = requestOrUrl;
+      port = typeof portOrInit === 'number' ? portOrInit : undefined;
+    } else {
+      // New style: containerFetch(url, init?, port?)
+      const url = typeof requestOrUrl === 'string' ? requestOrUrl : requestOrUrl.toString();
+      const init = typeof portOrInit === 'number' ? {} : (portOrInit || {});
+      port = typeof portOrInit === 'number' ? portOrInit :
+             typeof portParam === 'number' ? portParam : undefined;
+
+      // Create a Request object
+      request = new Request(url, init);
     }
 
     // Require a port to be specified, either as a parameter or as a defaultPort property
@@ -360,7 +389,7 @@ export class Container<Env = unknown> extends (Server as any) {
 
     if (!this.ctx.container.running) {
       try {
-        await this.startAndWaitForPorts(targetPort, maxTries);
+        await this.startAndWaitForPorts(targetPort);
       } catch (e) {
         return new Response(`Failed to start container: ${e instanceof Error ? e.message : String(e)}`, { status: 500 });
       }
@@ -933,9 +962,8 @@ export class Container<Env = unknown> extends (Server as any) {
    * Override this in your subclass to specify a port or implement custom request handling
    *
    * @param request The request to handle
-   * @param maxTries Maximum number of attempts to start the container if needed
    */
-  async fetch(request: Request, maxTries: number = 10): Promise<Response> {
+  async fetch(request: Request): Promise<Response> {
     // Renew the activity timeout whenever a request is received
     await this.renewActivityTimeout();
 
@@ -948,6 +976,6 @@ export class Container<Env = unknown> extends (Server as any) {
     }
 
     // Forward all requests (HTTP and WebSocket) to the container
-    return await this.containerFetch(request, this.defaultPort, maxTries);
+    return await this.containerFetch(request, this.defaultPort);
   }
 }
