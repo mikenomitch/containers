@@ -53,7 +53,7 @@ export default {
 
 ### Container Class
 
-The main class that wraps a container-enbled Durable Object to provide container functionality.
+The main class that extends a container-enbled Durable Object to provide additional container-specific functionality.
 
 #### Properties
 
@@ -217,7 +217,7 @@ export class ManualStartContainer extends Container {
   // if this is not specified, by default, you will wait only defaultPort
   requiredPorts = [8080, 9090, 3000];
 
-  // Disable automatic container startup (preferred way as a class property)
+  // Disable automatic container startup
   manualStart = true;
 
   constructor(ctx: any, env: any) {
