@@ -29,14 +29,14 @@ export class ConfiguredContainer extends Container {
     // this.env.ADDITIONAL_VAR = 'some value';
   }
 
-  // Lifecycle method called when container boots
-  override onBoot(): void {
+  // Lifecycle method called when container starts
+  override onStart(): void {
     const config = {
       env: this.env,
       entrypoint: this.entrypoint,
       enableInternet: this.enableInternet
     };
-    console.log('Container booted with config:', config);
+    console.log('Container started with config:', config);
   }
 
   // Override the fetch method to customize request handling

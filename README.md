@@ -6,7 +6,7 @@ A class for interacting with Containers on Cloudflare Workers.
 
 - HTTP request proxying and WebSocket forwarding
 - Simple container lifecycle management (starting and stopping containers)
-- Event hooks for container lifecycle events (onBoot, onShutdown, onError)
+- Event hooks for container lifecycle events (onStart, onShutdown, onError)
 - Configurable sleep timeout that renews on requests
 - Load balancing utilities
 
@@ -60,11 +60,11 @@ The main class that wraps a container-enbled Durable Object to provide container
 - `defaultPort?`: Optional default port to use when communicating with the container. If not set, you must specify port in containerFetch calls
 - `requiredPorts?`: Array of ports that should be checked for availability during container startup. Used by startAndWaitForPorts when no specific ports are provided.
 - `sleepAfter`: How long to keep the container alive without activity (format: number for seconds, or string like "5m", "30s", "1h")
-- `explicitContainerStart`: If true, container won't start automatically on DO boot (default: false). Set as a class property or via constructor options.
+- `explicitContainerStart`: If true, container won't start automatically on DO start (default: false). Set as a class property or via constructor options.
 - `env`: Environment variables to pass to the container (Record<string, string>)
 - `entrypoint?`: Custom entrypoint to override container default (string[])
 - `enableInternet`: Whether to enable internet access for the container (boolean, default: true)
-- Lifecycle methods: `onBoot`, `onShutdown`, `onError`
+- Lifecycle methods: `onStart`, `onShutdown`, `onError`
 
 #### Constructor Options
 
@@ -83,7 +83,7 @@ constructor(ctx: any, env: Env, options?: {
 
 ##### Lifecycle Methods
 
-- `onBoot()`: Called when container boots successfully - override to add custom behavior
+- `onStart()`: Called when container starts successfully - override to add custom behavior
 - `onShutdown()`: Called when container shuts down - override to add custom behavior
 - `onError(error)`: Called when container encounters an error - override to add custom behavior
 
@@ -116,9 +116,9 @@ export class MyContainer extends Container {
   // Supported formats: "10m" (minutes), "30s" (seconds), "1h" (hours), or a number (seconds)
   sleepAfter = "10m";
 
-  // Lifecycle method called when container boots
-  override onBoot(): void {
-    console.log('Container booted!');
+  // Lifecycle method called when container starts
+  override onStart(): void {
+    console.log('Container started!');
   }
 
   // Lifecycle method called when container shuts down
@@ -194,7 +194,7 @@ export class ConfiguredContainer extends Container {
   enableInternet = true;
 
   // These configuration properties will be used automatically
-  // when the container boots
+  // when the container starts
 }
 ```
 
@@ -209,7 +209,7 @@ export class ManualStartContainer extends Container {
   // Configure default port for the container
   defaultPort = 8080;
 
-  // Specify multiple required ports that must be ready before the container is considered booted
+  // Specify multiple required ports that must be ready before the container is considered started
   // if this is not specified, by default, you will wait only defaultPort
   requiredPorts = [8080, 9090, 3000];
 

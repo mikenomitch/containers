@@ -22,9 +22,9 @@ export class MyContainer extends Container {
     });
   }
 
-  // Lifecycle method called when container boots
-  override onBoot(): void {
-    console.log('Container booted!');
+  // Lifecycle method called when container starts
+  override onStart(): void {
+    console.log('Container started!');
   }
 
   // Lifecycle method called when container shuts down

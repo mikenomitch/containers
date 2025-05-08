@@ -13,8 +13,8 @@
     {
       "class_name": "MyContainer",
       "image": "./Dockerfile",
-      "instances": 5,
-      "name": "container-package-example-nomitch",
+      "max_instances": 10,
+      "name": "container-package-example-nomitch"
     }
   ],
   "durable_objects": {

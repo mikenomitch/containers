@@ -19,9 +19,9 @@ export class WebSocketContainer extends Container {
     super(ctx, env);
   }
 
-  // Lifecycle method called when container boots
-  override onBoot(): void {
-    console.log('Container booted for WebSocket connections');
+  // Lifecycle method called when container starts
+  override onStart(): void {
+    console.log('Container started for WebSocket connections');
   }
 
   // Lifecycle method called when container shuts down

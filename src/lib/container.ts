@@ -248,9 +248,9 @@ export class Container<Env = unknown> extends (Server as any) {
    * This method builds on startContainer by adding port availability verification:
    * 1. Calls startContainer to ensure the container is running
    * 2. If no ports are specified and requiredPorts is not set, it uses defaultPort (if set)
-   * 3. If no ports can be determined, it calls onBoot and renewActivityTimeout immediately
+   * 3. If no ports can be determined, it calls onStart and renewActivityTimeout immediately
    * 4. For each specified port, it polls until the port is available or maxTries is reached
-   * 5. When all ports are available, it triggers onBoot and renewActivityTimeout
+   * 5. When all ports are available, it triggers onStart and renewActivityTimeout
    *
    * The method prioritizes port sources in this order:
    * 1. Ports specified directly in the method call
@@ -286,7 +286,7 @@ export class Container<Env = unknown> extends (Server as any) {
     // If no ports to check, just start the container without waiting for port readiness
     if (portsToCheck.length === 0) {
       // Successfully started the container (without port check)
-      this.onBoot();
+      this.onStart();
       // Initialize activity timeout after successful start
       await this.renewActivityTimeout();
       return;
@@ -328,7 +328,7 @@ export class Container<Env = unknown> extends (Server as any) {
     }
 
     // All ports are ready
-    this.onBoot();
+    this.onStart();
     // Initialize activity timeout after successful start
     await this.renewActivityTimeout();
   }
@@ -518,10 +518,10 @@ export class Container<Env = unknown> extends (Server as any) {
   }
 
   /**
-   * Lifecycle method called when container boots successfully
-   * Override this method in subclasses to handle container boot events
+   * Lifecycle method called when container starts successfully
+   * Override this method in subclasses to handle container start events
    */
-  onBoot(): void | Promise<void> {
+  onStart(): void | Promise<void> {
     // Default implementation does nothing
   }
 

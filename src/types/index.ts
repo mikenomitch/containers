@@ -36,7 +36,7 @@ export interface ContainerOptions {
   /** Whether to enable internet access for the container */
   enableInternet?: boolean;
   
-  /** If true, container won't be started automatically when the durable object boots */
+  /** If true, container won't be started automatically when the durable object starts */
   explicitContainerStart?: boolean;
 }
 

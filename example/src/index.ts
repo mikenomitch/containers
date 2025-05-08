@@ -7,8 +7,8 @@ export class MyContainer extends Container {
     MESSAGE: "I was passed in via the container class!",
   };
 
-  override onBoot() {
-    console.log("Container successfully booted");
+  override onStart() {
+    console.log("Container successfully started");
   }
 
   override onShutdown() {

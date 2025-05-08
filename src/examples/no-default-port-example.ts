@@ -46,7 +46,7 @@ export class NoDefaultPortContainer extends Container {
   }
 
   // Lifecycle methods
-  override onBoot(): void {
+  override onStart(): void {
     console.log('Container started without checking any default port');
   }
 

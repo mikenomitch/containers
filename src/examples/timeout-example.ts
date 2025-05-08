@@ -14,9 +14,9 @@ export class TimeoutContainer extends Container {
     super(ctx, env);
   }
 
-  // Lifecycle method called when container boots
-  override onBoot(): void {
-    console.log('Container booted with timeout set to:', this.sleepAfter);
+  // Lifecycle method called when container starts
+  override onStart(): void {
+    console.log('Container started with timeout set to:', this.sleepAfter);
   }
 
   // Lifecycle method called when container shuts down

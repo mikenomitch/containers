@@ -25,8 +25,8 @@ export class WebSocketProxyContainer extends Container {
   }
 
   // Lifecycle methods
-  override onBoot(): void {
-    console.log('Container booted with WebSocket support');
+  override onStart(): void {
+    console.log('Container started with WebSocket support');
   }
 
   override onShutdown(): void {
