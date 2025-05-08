@@ -11,7 +11,7 @@ export class MyContainer extends Container {
     console.log("Container successfully started");
   }
 
-  override onShutdown() {
+  override onStop() {
     console.log("Container successfully shut down");
   }
 

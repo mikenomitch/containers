@@ -29,8 +29,8 @@ export class WebSocketProxyContainer extends Container {
     console.log('Container started with WebSocket support');
   }
 
-  override onShutdown(): void {
-    console.log('Container shutdown');
+  override onStop(): void {
+    console.log('Container stopped');
   }
 
   override onError(error: unknown): any {

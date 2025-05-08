@@ -196,14 +196,14 @@ describe('Container', () => {
     }).rejects.toThrow("No port specified for container fetch");
   });
 
-  test('shutdownContainer should destroy container if running', async () => {
+  test('stopContainer should destroy container if running', async () => {
     // Make mockCtx.container.running true for this test
     mockCtx.container.running = true;
 
     // @ts-ignore - ignore TypeScript errors for testing
-    await container.shutdownContainer('Test shutdown');
+    await container.stopContainer('Test stop');
 
-    expect(mockCtx.container.destroy).toHaveBeenCalledWith('Test shutdown');
+    expect(mockCtx.container.destroy).toHaveBeenCalledWith('Test stop');
   });
 
   test('renewActivityTimeout should schedule a container timeout', async () => {
@@ -220,7 +220,7 @@ describe('Container', () => {
     // We need to handle both numeric and string formats
     const scheduleCall = (container as any).schedule.mock.calls[0];
     expect(scheduleCall[0]).toBeGreaterThan(0); // Should be a positive number
-    expect(scheduleCall[1]).toBe('shutdownDueToInactivity'); // Method name
+    expect(scheduleCall[1]).toBe('stopDueToInactivity'); // Method name
   });
 
   test('should renew activity timeout on fetch', async () => {

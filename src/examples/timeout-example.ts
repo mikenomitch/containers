@@ -20,8 +20,8 @@ export class TimeoutContainer extends Container {
   }
 
   // Lifecycle method called when container shuts down
-  override onShutdown(): void {
-    console.log('Container shutdown.');
+  override onStop(): void {
+    console.log('Container stopped.');
   }
 
   // Custom method that will renew the activity timeout
@@ -50,7 +50,7 @@ export class TimeoutContainer extends Container {
       return new Response(JSON.stringify({
         success: true,
         message: 'Background task executed',
-        nextShutdown: `Container will shut down after ${this.sleepAfter} of inactivity`
+        nextStop: `Container will shut down after ${this.sleepAfter} of inactivity`
       }), {
         headers: { 'Content-Type': 'application/json' }
       });

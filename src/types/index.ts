@@ -20,22 +20,22 @@ export interface ContainerMessage<T = unknown> {
 export interface ContainerOptions {
   /** Optional ID for the container */
   id?: string;
-  
+
   /** Default port number to connect to (defaults to container.defaultPort) */
   defaultPort?: number;
-  
+
   /** How long to keep the container alive without activity */
   sleepAfter?: string | number;
-  
+
   /** Environment variables to pass to the container */
   env?: Record<string, string>;
-  
+
   /** Custom entrypoint to override container default */
   entrypoint?: string[];
-  
+
   /** Whether to enable internet access for the container */
   enableInternet?: boolean;
-  
+
   /** If true, container won't be started automatically when the durable object starts */
   explicitContainerStart?: boolean;
 }
@@ -51,7 +51,7 @@ export interface ContainerContext {
 }
 
 /**
- * Function to handle container events 
+ * Function to handle container events
  */
 export type ContainerEventHandler = () => void | Promise<void>;
 

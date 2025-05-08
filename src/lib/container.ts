@@ -154,7 +154,7 @@ export class Container<Env = unknown> extends (Server as any) {
    * - Internet access settings (this.enableInternet)
    *
    * It also sets up monitoring to track container lifecycle events and automatically
-   * calls the onShutdown handler when the container terminates.
+   * calls the onStop handler when the container terminates.
    *
    * @example
    * // Basic usage in a custom Container implementation
@@ -201,7 +201,7 @@ export class Container<Env = unknown> extends (Server as any) {
           try {
             // Track container status
             this.ctx.container.monitor().then(() => {
-              this.onShutdown();
+              this.onStop();
             }).catch((error: unknown) => {
               this.onError(error);
             });
@@ -503,7 +503,7 @@ export class Container<Env = unknown> extends (Server as any) {
   /**
    * Shuts down the container
    */
-  async shutdownContainer(reason?: string): Promise<void> {
+  async stopContainer(reason?: string): Promise<void> {
     if (!this.ctx.container || !this.ctx.container.running) {
       return;
     }
@@ -511,10 +511,10 @@ export class Container<Env = unknown> extends (Server as any) {
     // Cancel any pending sleep timeout
     await this.#cancelSleepTimeout();
 
-    this.ctx.container.destroy(reason || "Container shutdown requested");
+    this.ctx.container.destroy(reason || "Container stopped requested");
 
-    // Call shutdown handler
-    this.onShutdown();
+    // Call stop handler
+    this.onStop();
   }
 
   /**
@@ -527,9 +527,9 @@ export class Container<Env = unknown> extends (Server as any) {
 
   /**
    * Lifecycle method called when container shuts down
-   * Override this method in subclasses to handle container shutdown events
+   * Override this method in subclasses to handle Container stopped events
    */
-  onShutdown(): void | Promise<void> {
+  onStop(): void | Promise<void> {
     // Default implementation does nothing
   }
 
@@ -588,7 +588,7 @@ export class Container<Env = unknown> extends (Server as any) {
   }
 
   /**
-   * Schedule a container shutdown after the specified sleep timeout
+   * Schedule a Container stopped after the specified sleep timeout
    * @private
    */
   async #scheduleSleepTimeout(): Promise<void> {
@@ -598,8 +598,8 @@ export class Container<Env = unknown> extends (Server as any) {
     // Cancel any existing timeout
     await this.#cancelSleepTimeout();
 
-    // Schedule the container shutdown
-    const { id } = await this.schedule(timeoutInSeconds, "shutdownDueToInactivity");
+    // Schedule the Container stopped
+    const { id } = await this.schedule(timeoutInSeconds, "stopDueToInactivity");
     this.#sleepTimeoutTaskId = id;
   }
 
@@ -916,14 +916,14 @@ export class Container<Env = unknown> extends (Server as any) {
   }
 
   /**
-   * Method called by scheduled task to shutdown the container due to inactivity
+   * Method called by scheduled task to stop the container due to inactivity
    */
-  async shutdownDueToInactivity(): Promise<void> {
+  async stopDueToInactivity(): Promise<void> {
     // Clear the task ID since it's been executed
     this.#sleepTimeoutTaskId = null;
 
-    // Shutdown the container if it's still running
-    this.shutdownContainer("Container shut down due to inactivity timeout");
+    // Stop the container if it's still running
+    this.stopContainer("Container shut down due to inactivity timeout");
   }
 
 

@@ -50,7 +50,7 @@ export class NoDefaultPortContainer extends Container {
     console.log('Container started without checking any default port');
   }
 
-  override onShutdown(): void {
-    console.log('Container shutdown');
+  override onStop(): void {
+    console.log('Container stopped');
   }
 }

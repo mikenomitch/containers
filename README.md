@@ -6,7 +6,7 @@ A class for interacting with Containers on Cloudflare Workers.
 
 - HTTP request proxying and WebSocket forwarding
 - Simple container lifecycle management (starting and stopping containers)
-- Event hooks for container lifecycle events (onStart, onShutdown, onError)
+- Event hooks for container lifecycle events (onStart, onStop, onError)
 - Configurable sleep timeout that renews on requests
 - Load balancing utilities
 
@@ -64,7 +64,7 @@ The main class that wraps a container-enbled Durable Object to provide container
 - `env`: Environment variables to pass to the container (Record<string, string>)
 - `entrypoint?`: Custom entrypoint to override container default (string[])
 - `enableInternet`: Whether to enable internet access for the container (boolean, default: true)
-- Lifecycle methods: `onStart`, `onShutdown`, `onError`
+- Lifecycle methods: `onStart`, `onStop`, `onError`
 
 #### Constructor Options
 
@@ -84,7 +84,7 @@ constructor(ctx: any, env: Env, options?: {
 ##### Lifecycle Methods
 
 - `onStart()`: Called when container starts successfully - override to add custom behavior
-- `onShutdown()`: Called when container shuts down - override to add custom behavior
+- `onStop()`: Called when container shuts down - override to add custom behavior
 - `onError(error)`: Called when container encounters an error - override to add custom behavior
 
 ##### Container Methods
@@ -93,9 +93,9 @@ constructor(ctx: any, env: Env, options?: {
 - `containerFetch(request, port?)`: Sends an HTTP or WebSocket request to the container. Either port parameter or defaultPort must be specified. Automatically detects WebSocket upgrade requests.
 - `startContainer()`: Starts the container if it's not running and sets up monitoring, without waiting for any ports to be ready.
 - `startAndWaitForPorts(ports?, maxTries?)`: Starts the container using startContainer and then waits for specified ports to be ready. If no ports are specified, uses `requiredPorts` or `defaultPort`. If no ports can be determined, just starts the container without port checks.
-- `shutdownContainer(reason?)`: Stops the container
+- `stopContainer(reason?)`: Stops the container
 - `renewActivityTimeout()`: Manually renews the container activity timeout (extends container lifetime)
-- `shutdownDueToInactivity()`: Called automatically when the container times out due to inactivity
+- `stopDueToInactivity()`: Called automatically when the container times out due to inactivity
 
 ### Utility Functions
 
@@ -122,8 +122,8 @@ export class MyContainer extends Container {
   }
 
   // Lifecycle method called when container shuts down
-  override onShutdown(): void {
-    console.log('Container shutdown!');
+  override onStop(): void {
+    console.log('Container stopped!');
   }
 
   // Lifecycle method called on errors
@@ -342,7 +342,7 @@ export class TimeoutContainer extends Container {
       return new Response(JSON.stringify({
         success: true,
         message: 'Background task executed',
-        nextShutdown: `Container will shut down after ${this.sleepAfter} of inactivity`
+        nextStop: `Container will shut down after ${this.sleepAfter} of inactivity`
       }), { headers: { 'Content-Type': 'application/json' } });
     }
 

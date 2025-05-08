@@ -24,7 +24,7 @@ export class ConfiguredContainer extends Container {
   constructor(ctx: any, env: any) {
     // Container configuration is set via instance properties
     super(ctx, env);
-    
+
     // You can also modify config properties here if needed
     // this.env.ADDITIONAL_VAR = 'some value';
   }

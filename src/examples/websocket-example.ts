@@ -25,8 +25,8 @@ export class WebSocketContainer extends Container {
   }
 
   // Lifecycle method called when container shuts down
-  override onShutdown(): void {
-    console.log('Container shutdown');
+  override onStop(): void {
+    console.log('Container stopped');
   }
 
   // Lifecycle method called on errors
