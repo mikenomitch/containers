@@ -1,6 +1,6 @@
 {
   "name": "cf-containers",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "TypeScript helper class for PartyKit durable object containers",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -39,6 +39,7 @@
     "prettier": "^3.5.3",
     "ts-jest": "^29.3.2",
     "tsup": "^8.0.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "@cloudflare/workers-types": "^4.20250403.0"
   }
 }
