@@ -8,7 +8,7 @@ export class ConfiguredContainer extends Container {
   defaultPort = 9000;
 
   // Environment variables to pass to the container
-  env = {
+  envVars = {
     NODE_ENV: 'production',
     LOG_LEVEL: 'info',
     APP_PORT: '9000',
@@ -26,13 +26,13 @@ export class ConfiguredContainer extends Container {
     super(ctx, env);
 
     // You can also modify config properties here if needed
-    // this.env.ADDITIONAL_VAR = 'some value';
+    // this.envVars.ADDITIONAL_VAR = 'some value';
   }
 
   // Lifecycle method called when container starts
   override onStart(): void {
     const config = {
-      env: this.env,
+      env: this.envVars,
       entrypoint: this.entrypoint,
       enableInternet: this.enableInternet
     };
@@ -46,7 +46,7 @@ export class ConfiguredContainer extends Container {
     // Special endpoint to view current configuration
     if (url.pathname === '/config') {
       const config = {
-        env: this.env,
+        env: this.envVars,
         entrypoint: this.entrypoint,
         enableInternet: this.enableInternet
       };

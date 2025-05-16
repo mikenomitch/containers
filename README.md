@@ -188,7 +188,7 @@ export class ConfiguredContainer extends Container {
   sleepAfter = "2h";
 
   // Environment variables to pass to the container
-  env = {
+  envVars = {
     NODE_ENV: 'production',
     LOG_LEVEL: 'info',
     APP_PORT: '9000'

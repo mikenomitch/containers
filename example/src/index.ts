@@ -3,7 +3,7 @@ import { Container, loadBalance } from 'cf-containers';
 export class MyContainer extends Container {
   defaultPort = 8080;
   sleepAfter = "10s";
-  env = {
+  envVars = {
     MESSAGE: "I was passed in via the container class!",
   };
 

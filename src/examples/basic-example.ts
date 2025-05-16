@@ -13,7 +13,7 @@ export class MyContainer extends Container {
   constructor(ctx: any, env: any) {
     super(ctx, env, {
       // Container configuration - these are the same settings used when calling this.ctx.container.start()
-      env: {
+      envVars: {
         NODE_ENV: "production",
         LOG_LEVEL: "info"
       },

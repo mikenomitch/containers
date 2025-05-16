@@ -23,11 +23,11 @@ declare module 'partyserver' {
     constructor(ctx: any, env: Env);
     get room(): string;
     broadcast(message: string | ArrayBufferLike, ignore?: string[]): void;
-    
+
     // Scheduled task methods
     schedule(delaySeconds: number, methodName: string, data?: any): Promise<{taskId: string}>;
     unschedule(taskId: string): Promise<void>;
-    
+
     ctx: {
       storage: {
         sql: {
@@ -37,8 +37,8 @@ declare module 'partyserver' {
       blockConcurrencyWhile(fn: () => Promise<void>): void;
       container?: {
         running: boolean;
-        start(options?: { 
-          env?: Record<string, string>; 
+        start(options?: {
+          env?: Record<string, string>;
           entrypoint?: string[];
           enableInternet?: boolean;
         }): void;
@@ -50,7 +50,7 @@ declare module 'partyserver' {
       };
     };
   }
-  
+
   export interface WebSocket {
     accept(): void;
     send(message: string | ArrayBufferLike): void;
@@ -59,9 +59,9 @@ declare module 'partyserver' {
     addEventListener(type: 'close', handler: (event: { code: number; reason: string }) => void): void;
     addEventListener(type: 'error', handler: (event: any) => void): void;
   }
-  
+
   export type WebSocketPair = [WebSocket, WebSocket];
-  
+
   export function WebSocketPair(): WebSocketPair;
 
   export interface Connection {

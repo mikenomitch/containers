@@ -59,7 +59,7 @@ export class Container<Env = unknown> extends (Server as any) {
    * Container configuration properties
    * Set these properties directly in your container instance
    */
-  env: Record<string, string> = {};
+  envVars: Record<string, string> = {};
   entrypoint?: string[];
   enableInternet: boolean = true;
 
@@ -191,7 +191,7 @@ export class Container<Env = unknown> extends (Server as any) {
             enableInternet?: boolean;
           } = {};
 
-          if (Object.keys(this.env).length > 0) startConfig.env = this.env;
+          if (Object.keys(this.envVars).length > 0) startConfig.env = this.envVars;
           if (this.entrypoint) startConfig.entrypoint = this.entrypoint;
           if (this.enableInternet !== undefined) startConfig.enableInternet = this.enableInternet;
 

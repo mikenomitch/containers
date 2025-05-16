@@ -14,7 +14,7 @@ export class WebSocketProxyContainer extends Container {
   constructor(ctx: any, env: any) {
     super(ctx, env, {
       // Container environment variables
-      env: {
+      envVars: {
         NODE_ENV: "production",
         ENABLE_WEBSOCKETS: "true"
       },

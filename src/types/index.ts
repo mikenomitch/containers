@@ -28,7 +28,7 @@ export interface ContainerOptions {
   sleepAfter?: string | number;
 
   /** Environment variables to pass to the container */
-  env?: Record<string, string>;
+  envVars?: Record<string, string>;
 
   /** Custom entrypoint to override container default */
   entrypoint?: string[];
