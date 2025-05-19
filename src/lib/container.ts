@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import type { ContainerOptions, ContainerStartOptions, Schedule } from '../types';
-import { type DurableObject } from 'cloudflare:workers';
+import { DurableObject } from 'cloudflare:workers';
 
 /**
  * Params sent to `onStop` method when the container stops
@@ -80,13 +80,7 @@ function getExitCodeFromError(error: unknown): number | null {
 /**
  * Main Container class that wraps PartyKit's Server with container functionality
  */
-export class Container<Env = unknown> {
-  ctx: DurableObject['ctx'];
-  env: Env;
-
-  // @ts-ignore
-  public __DURABLE_OBJECT_BRAND: never;
-
+export class Container<Env = unknown> extends DurableObject {
   // Default port for the container (undefined means no default port)
   defaultPort?: number;
 
@@ -130,8 +124,7 @@ export class Container<Env = unknown> {
   private container: NonNullable<DurableObject['ctx']['container']>;
 
   constructor(ctx: DurableObject['ctx'], env: Env, options?: ContainerOptions) {
-    this.ctx = ctx;
-    this.env = env;
+    super(ctx, env);
 
     this.ctx.blockConcurrencyWhile(async () => {
       // First thing, schedule the next alarms
@@ -800,7 +793,7 @@ export class Container<Env = unknown> {
    * Method called when an alarm fires
    * Executes any scheduled tasks that are due
    */
-  async alarm(alarmProps: { isRetry: boolean; retryCount: number }): Promise<void> {
+  override async alarm(alarmProps: { isRetry: boolean; retryCount: number }): Promise<void> {
     const maxRetries = 3;
 
     //
@@ -913,7 +906,7 @@ export class Container<Env = unknown> {
    *
    * @param request The request to handle
    */
-  async fetch(request: Request): Promise<Response> {
+  override async fetch(request: Request): Promise<Response> {
     // Check if default port is set
     if (this.defaultPort === undefined) {
       return new Response(
@@ -925,14 +918,4 @@ export class Container<Env = unknown> {
     // Forward all requests (HTTP and WebSocket) to the container
     return await this.containerFetch(request, this.defaultPort);
   }
-
-  // rest of DO methods
-  webSocketMessage?(ws: WebSocket, message: string | ArrayBuffer): void | Promise<void>;
-  webSocketClose?(
-    ws: WebSocket,
-    code: number,
-    reason: string,
-    wasClean: boolean
-  ): void | Promise<void>;
-  webSocketError?(ws: WebSocket, error: unknown): void | Promise<void>;
 }

@@ -1,6 +1,6 @@
 {
   "name": "cf-containers",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "TypeScript helper class for PartyKit durable object containers",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -9,7 +9,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "build": "tsup src/index.ts --external cloudflare:workers --format cjs,esm --dts",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx --config .eslintrc.js",
