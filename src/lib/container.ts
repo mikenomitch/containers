@@ -77,14 +77,94 @@ function getExitCodeFromError(error: unknown): number | null {
   return null;
 }
 
+type State = {
+  lastChange: number;
+} & (
+  | {
+      // 'running' means that the container is trying to start and is transitioning to a healthy status.
+      //           onStop might be triggered if there is an exit code, and it will transition to 'stopped'.
+      status: 'running' | 'stopping' | 'stopped' | 'healthy';
+    }
+  | {
+      status: 'stopped_with_code';
+      exitCode?: number;
+    }
+);
+
+export const containerStateKey = '__CF_CONTAINER_STATE';
+
 /**
- * Main Container class that wraps PartyKit's Server with container functionality
+ * ContainerState is a wrapper around a DO storage to store and get
+ * the container state.
+ * It's useful to track which kind of events have been handled by the user,
+ * a transition to a new state won't be successful unless the user's hook has been
+ * triggered and waited for.
+ * A user hook might be repeated multiple times if they throw errors.
+ */
+class ContainerState {
+  constructor(private storage: DurableObject['ctx']['storage']) {}
+
+  status?: State;
+
+  async setRunning() {
+    this.status = { lastChange: Date.now(), status: 'running' };
+    await this.update();
+  }
+
+  private async update() {
+    if (!this.status) throw new Error('status should be init');
+    await this.storage.put<State>(containerStateKey, this.status);
+  }
+
+  async setHealthy() {
+    this.status = { lastChange: Date.now(), status: 'healthy' };
+    await this.update();
+  }
+
+  async setStopping() {
+    this.status = { status: 'stopping', lastChange: Date.now() };
+    await this.update();
+  }
+
+  async setStopped() {
+    this.status = { status: 'stopped', lastChange: Date.now() };
+    await this.update();
+  }
+
+  async setStoppedWithCode(exitCode: number) {
+    this.status = { status: 'stopped_with_code', lastChange: Date.now(), exitCode };
+    await this.update();
+  }
+
+  async getState(): Promise<State> {
+    if (!this.status) {
+      const state = await this.storage.get<State>(containerStateKey);
+      if (!state) {
+        this.status = {
+          status: 'stopped',
+          lastChange: Date.now(),
+        };
+        await this.update();
+      } else {
+        this.status = state;
+      }
+    }
+
+    return this.status!;
+  }
+}
+
+/**
+ * Main Container class
  */
 export class Container<Env = unknown> extends DurableObject {
   // Default port for the container (undefined means no default port)
   defaultPort?: number;
 
   // Timeout after which the container will sleep if no activity
+  //
+  // The signal sent to the container by default is a SIGTERM.
+  // The container won't get a SIGKILL if this threshold is triggered.
   sleepAfter: string | number = '5m';
 
   // Internal tracking for sleep timeout task
@@ -104,7 +184,7 @@ export class Container<Env = unknown> extends DurableObject {
   /**
    * Execute SQL queries against the Container's database
    */
-  sql<T = Record<string, string | number | boolean | null>>(
+  private sql<T = Record<string, string | number | boolean | null>>(
     strings: TemplateStringsArray,
     ...values: (string | number | boolean | null)[]
   ) {
@@ -123,8 +203,12 @@ export class Container<Env = unknown> extends DurableObject {
 
   private container: NonNullable<DurableObject['ctx']['container']>;
 
+  private state: ContainerState;
+
   constructor(ctx: DurableObject['ctx'], env: Env, options?: ContainerOptions) {
     super(ctx, env);
+
+    this.state = new ContainerState(this.ctx.storage);
 
     this.ctx.blockConcurrencyWhile(async () => {
       // First thing, schedule the next alarms
@@ -168,6 +252,9 @@ export class Container<Env = unknown> extends DurableObject {
         // Start container and wait for any required ports
         await this.startAndWaitForPorts();
         // Activity timeout is initialized in startAndWaitForPorts
+      } else if (this.container.running && !this.monitor) {
+        this.monitor = this.container.monitor();
+        this.setupMonitor();
       }
     });
   }
@@ -178,6 +265,8 @@ export class Container<Env = unknown> extends DurableObject {
   shouldAutoStart(): boolean {
     return !this.manualStart; // Auto-start unless manual start is enabled
   }
+
+  private monitor: Promise<unknown> | undefined;
 
   /**
    * Start the container if it's not running and set up monitoring
@@ -212,12 +301,22 @@ export class Container<Env = unknown> extends DurableObject {
    * @throws Error if no container context is available or if all start attempts fail
    */
   async startContainer(): Promise<void> {
+    await this.#startContainerIfNotRunning();
+    this.setupMonitor();
+  }
+
+  async #startContainerIfNotRunning(): Promise<Promise<unknown>> {
     // Start the container if it's not running
     if (this.container.running) {
-      return;
+      if (!this.monitor) {
+        this.monitor = this.container.monitor();
+      }
+
+      return this.monitor;
     }
 
-    for (;;) {
+    await this.state.setRunning();
+    for (let tries = 0; ; tries++) {
       // Only include properties that are defined
       const startConfig: ContainerStartOptions = {
         enableInternet: this.enableInternet,
@@ -227,43 +326,57 @@ export class Container<Env = unknown> extends DurableObject {
       if (this.entrypoint) startConfig.entrypoint = this.entrypoint;
 
       await this.#cancelSleepTimeout();
-      this.container.start(startConfig);
+
+      const handleError = async () => {
+        const err = await this.monitor?.catch(err => err as Error);
+
+        if (typeof err === 'number') {
+          const toThrow = new Error(
+            `Error starting container, early exit code 0 before we could check for healthiness, did it crash early?`
+          );
+
+          try {
+            await this.onError(toThrow);
+          } catch {}
+          throw toThrow;
+        } else if (!isNoInstanceError(err)) {
+          try {
+            await this.onError(err);
+          } catch {}
+
+          throw err;
+        }
+      };
+
+      if (!this.container.running) {
+        if (tries > 0) {
+          await handleError();
+        }
+
+        this.container.start(startConfig);
+        this.monitor = this.container.monitor();
+      }
+
       await this.renewActivityTimeout();
-
-      // Track container status
-      this.container
-        .monitor()
-        .then(() => {
-          this.onStop({ exitCode: 0, reason: 'exit' });
-        })
-        .catch((error: unknown) => {
-          if (isNoInstanceError(error)) {
-            // we will inform later
-            return;
-          }
-
-          const exitCode = getExitCodeFromError(error);
-          if (exitCode !== null) {
-            this.onStop({
-              exitCode,
-              reason: isRuntimeSignalledError(error) ? 'runtime_signal' : 'exit',
-            });
-
-            return;
-          }
-
-          this.onError(error);
-        });
-
       const port = this.container.getTcpPort(33);
       try {
         await port.fetch('http://containerstarthealthcheck');
-        return;
+        return this.monitor;
       } catch (error) {
-        if (isNotListeningError(error)) return;
+        if (isNotListeningError(error) && this.container.running) {
+          return;
+        }
+
+        if (!this.container.running && isNotListeningError(error)) {
+          try {
+            await this.onError(new Error(`container crashed when checking if it was ready`));
+          } catch {}
+
+          throw error;
+        }
 
         console.warn(
-          'Error hitting port 33 to check if container is ready:',
+          'Error checking if container is ready:',
           error instanceof Error ? error.message : String(error)
         );
 
@@ -278,6 +391,89 @@ export class Container<Env = unknown> extends DurableObject {
    * Override this in your subclass to specify ports that must be ready
    */
   requiredPorts?: number[];
+
+  // synchronises container state with the container source of truth to process events
+  async #syncPendingStoppedEvents() {
+    const state = await this.state.getState();
+    if (!this.container.running && state.status === 'healthy') {
+      await new Promise(res =>
+        // setTimeout to process monitor() just in case
+        setTimeout(async () => {
+          await this.ctx.blockConcurrencyWhile(async () => {
+            const newState = await this.state.getState();
+            if (newState.status !== state.status) {
+              // we got it, sync'd
+              return;
+            }
+
+            // we lost the exit code! :(
+            await this.onStop({ exitCode: 0, reason: 'exit' });
+            await this.state.setStopped();
+          });
+
+          res(true);
+        })
+      );
+
+      return;
+    }
+
+    if (!this.container.running && state.status === 'stopped_with_code') {
+      await new Promise(res =>
+        // setTimeout to process monitor() just in case
+        setTimeout(async () => {
+          await this.ctx.blockConcurrencyWhile(async () => {
+            const newState = await this.state.getState();
+            if (newState.status !== state.status) {
+              // we got it, sync'd
+              return;
+            }
+
+            await this.onStop({ exitCode: state.exitCode ?? 0, reason: 'exit' });
+            await this.state.setStopped();
+            res(true);
+          });
+        })
+      );
+      return;
+    }
+  }
+
+  private setupMonitor() {
+    this.monitor
+      ?.then(async () => {
+        this.ctx.blockConcurrencyWhile(async () => {
+          await this.state.setStoppedWithCode(0);
+          await this.onStop({ exitCode: 0, reason: 'exit' });
+          await this.state.setStopped();
+        });
+      })
+      .catch(async (error: unknown) => {
+        if (isNoInstanceError(error)) {
+          // we will inform later
+          return;
+        }
+
+        const exitCode = getExitCodeFromError(error);
+        if (exitCode !== null) {
+          this.ctx.blockConcurrencyWhile(async () => {
+            await this.state.setStoppedWithCode(exitCode);
+            await this.onStop({
+              exitCode,
+              reason: isRuntimeSignalledError(error) ? 'runtime_signal' : 'exit',
+            });
+            await this.state.setStopped();
+          });
+
+          return;
+        }
+
+        try {
+          // TODO: Be able to retrigger onError
+          await this.onError(error);
+        } catch {}
+      });
+  }
 
   /**
    * Start the container and wait for ports to be available
@@ -300,57 +496,93 @@ export class Container<Env = unknown> extends DurableObject {
    * @throws Error if port checks fail after maxTries attempts
    */
   async startAndWaitForPorts(ports?: number | number[], maxTries: number = 10): Promise<void> {
-    // Start the container if it's not running
-    await this.startContainer();
+    const state = await this.state.getState();
+    if (state.status === 'healthy' && this.container.running) {
+      if (this.container.running && !this.monitor) {
+        await this.#startContainerIfNotRunning();
+        this.setupMonitor();
+      }
 
-    // Determine which ports to check
-    let portsToCheck: number[] = [];
-
-    if (ports !== undefined) {
-      // Use explicitly provided ports (single port or array)
-      portsToCheck = Array.isArray(ports) ? ports : [ports];
-    } else if (this.requiredPorts && this.requiredPorts.length > 0) {
-      // Use requiredPorts class property if available
-      portsToCheck = [...this.requiredPorts];
-    } else if (this.defaultPort !== undefined) {
-      // Fall back to defaultPort if available
-      portsToCheck = [this.defaultPort];
+      return;
     }
 
-    // Check each port
-    for (const port of portsToCheck) {
-      const tcpPort = this.container.getTcpPort(port);
-      let portReady = false;
+    // trigger all onStop that we didn't do yet
+    await this.#syncPendingStoppedEvents();
 
-      // Try to connect to the port multiple times
-      for (let i = 0; i < maxTries && !portReady; i++) {
-        try {
-          await tcpPort.fetch('http://ping');
+    await this.ctx.blockConcurrencyWhile(async () => {
+      // Start the container if it's not running
+      await this.#startContainerIfNotRunning();
 
-          // Successfully connected to this port
-          portReady = true;
-          console.log(`Port ${port} is ready`);
-        } catch (e) {
-          // Check for specific error messages that indicate we should keep retrying
-          const errorMessage = e instanceof Error ? e.message : String(e);
+      // Determine which ports to check
+      let portsToCheck: number[] = [];
 
-          console.warn(`Error checking ${port}: ${errorMessage}`);
+      if (ports !== undefined) {
+        // Use explicitly provided ports (single port or array)
+        portsToCheck = Array.isArray(ports) ? ports : [ports];
+      } else if (this.requiredPorts && this.requiredPorts.length > 0) {
+        // Use requiredPorts class property if available
+        portsToCheck = [...this.requiredPorts];
+      } else if (this.defaultPort !== undefined) {
+        // Fall back to defaultPort if available
+        portsToCheck = [this.defaultPort];
+      }
 
-          // If we're on the last attempt and the port is still not ready, fail
-          if (i === maxTries - 1) {
-            throw new Error(
-              `Failed to verify port ${port} is available after ${maxTries} attempts`
-            );
+      // Check each port
+      for (const port of portsToCheck) {
+        const tcpPort = this.container.getTcpPort(port);
+        let portReady = false;
+
+        // Try to connect to the port multiple times
+        for (let i = 0; i < maxTries && !portReady; i++) {
+          try {
+            await tcpPort.fetch('http://ping');
+
+            // Successfully connected to this port
+            portReady = true;
+            console.log(`Port ${port} is ready`);
+          } catch (e) {
+            // Check for specific error messages that indicate we should keep retrying
+            const errorMessage = e instanceof Error ? e.message : String(e);
+
+            console.warn(`Error checking ${port}: ${errorMessage}`);
+
+            // If not running, it means the container crashed
+            if (!this.container.running) {
+              try {
+                await this.onError(
+                  new Error(
+                    `Container crashed while checking for ports, did you setup the entrypoint correctly?`
+                  )
+                );
+              } catch {}
+
+              throw e;
+            }
+
+            // If we're on the last attempt and the port is still not ready, fail
+            if (i === maxTries - 1) {
+              try {
+                this.onError(
+                  `Failed to verify port ${port} is available after ${maxTries} attempts, last error: ${errorMessage}`
+                );
+              } catch {}
+              throw e;
+            }
+
+            // Wait a bit before trying again (300ms like in containers-starter-go)
+            await new Promise(resolve => setTimeout(resolve, 300));
           }
-
-          // Wait a bit before trying again (300ms like in containers-starter-go)
-          await new Promise(resolve => setTimeout(resolve, 300));
         }
       }
-    }
+    });
 
-    // All ports are ready
-    this.onStart();
+    this.setupMonitor();
+
+    await this.ctx.blockConcurrencyWhile(async () => {
+      // All ports are ready
+      await this.onStart();
+      await this.state.setHealthy();
+    });
   }
 
   /**
@@ -409,7 +641,8 @@ export class Container<Env = unknown> extends DurableObject {
     // Use specified port or defaultPort
     const targetPort = port ?? this.defaultPort;
 
-    if (!this.container.running) {
+    const state = await this.state.getState();
+    if (!this.container.running || state.status !== 'healthy') {
       try {
         await this.startAndWaitForPorts(targetPort);
       } catch (e) {
@@ -499,7 +732,8 @@ export class Container<Env = unknown> extends DurableObject {
     try {
       return await fn();
     } catch (e) {
-      throw this.onError(e);
+      this.onError(e);
+      throw e;
     }
   }
 
@@ -846,6 +1080,8 @@ export class Container<Env = unknown> extends DurableObject {
         // Delete the schedule after execution (one-time schedules)
         this.sql`DELETE FROM container_schedules WHERE id = ${row.id}`;
       }
+
+      await this.#syncPendingStoppedEvents();
 
       // if not running and nothing to do, stop
       if (!this.container.running) {
