@@ -81,6 +81,8 @@ type State = {
   lastChange: number;
 } & (
   | {
+      // 'running' means that the container is trying to start and is transitioning to a healthy status.
+      //           onStop might be triggered if there is an exit code, and it will transition to 'stopped'.
       status: 'running' | 'stopping' | 'stopped' | 'healthy';
     }
   | {
@@ -89,6 +91,16 @@ type State = {
     }
 );
 
+export const containerStateKey = '__CF_CONTAINER_STATE';
+
+/**
+ * ContainerState is a wrapper around a DO storage to store and get
+ * the container state.
+ * It's useful to track which kind of events have been handled by the user,
+ * a transition to a new state won't be successful unless the user's hook has been
+ * triggered and waited for.
+ * A user hook might be repeated multiple times if they throw errors.
+ */
 class ContainerState {
   constructor(private storage: DurableObject['ctx']['storage']) {}
 
@@ -101,7 +113,7 @@ class ContainerState {
 
   private async update() {
     if (!this.status) throw new Error('status should be init');
-    this.storage.put('status', this.status);
+    await this.storage.put<State>(containerStateKey, this.status);
   }
 
   async setHealthy() {
@@ -126,13 +138,15 @@ class ContainerState {
 
   async getState(): Promise<State> {
     if (!this.status) {
-      const state = await this.storage.get<State>('status');
+      const state = await this.storage.get<State>(containerStateKey);
       if (!state) {
         this.status = {
           status: 'stopped',
           lastChange: Date.now(),
         };
         await this.update();
+      } else {
+        this.status = state;
       }
     }
 
@@ -141,13 +155,16 @@ class ContainerState {
 }
 
 /**
- * Main Container class that wraps PartyKit's Server with container functionality
+ * Main Container class
  */
 export class Container<Env = unknown> extends DurableObject {
   // Default port for the container (undefined means no default port)
   defaultPort?: number;
 
   // Timeout after which the container will sleep if no activity
+  //
+  // The signal sent to the container by default is a SIGTERM.
+  // The container won't get a SIGKILL if this threshold is triggered.
   sleepAfter: string | number = '5m';
 
   // Internal tracking for sleep timeout task
@@ -167,7 +184,7 @@ export class Container<Env = unknown> extends DurableObject {
   /**
    * Execute SQL queries against the Container's database
    */
-  sql<T = Record<string, string | number | boolean | null>>(
+  private sql<T = Record<string, string | number | boolean | null>>(
     strings: TemplateStringsArray,
     ...values: (string | number | boolean | null)[]
   ) {
@@ -235,6 +252,9 @@ export class Container<Env = unknown> extends DurableObject {
         // Start container and wait for any required ports
         await this.startAndWaitForPorts();
         // Activity timeout is initialized in startAndWaitForPorts
+      } else if (this.container.running && !this.monitor) {
+        this.monitor = this.container.monitor();
+        this.setupMonitor();
       }
     });
   }
@@ -281,13 +301,22 @@ export class Container<Env = unknown> extends DurableObject {
    * @throws Error if no container context is available or if all start attempts fail
    */
   async startContainer(): Promise<void> {
+    await this.#startContainerIfNotRunning();
+    this.setupMonitor();
+  }
+
+  async #startContainerIfNotRunning(): Promise<Promise<unknown>> {
     // Start the container if it's not running
     if (this.container.running) {
-      return;
+      if (!this.monitor) {
+        this.monitor = this.container.monitor();
+      }
+
+      return this.monitor;
     }
 
     await this.state.setRunning();
-    for (;;) {
+    for (let tries = 0; ; tries++) {
       // Only include properties that are defined
       const startConfig: ContainerStartOptions = {
         enableInternet: this.enableInternet,
@@ -298,18 +327,53 @@ export class Container<Env = unknown> extends DurableObject {
 
       await this.#cancelSleepTimeout();
 
-      this.container.start(startConfig);
+      const handleError = async () => {
+        const err = await this.monitor?.catch(err => err as Error);
+
+        if (typeof err === 'number') {
+          const toThrow = new Error(
+            `Error starting container, early exit code 0 before we could check for healthiness, did it crash early?`
+          );
+
+          try {
+            await this.onError(toThrow);
+          } catch {}
+          throw toThrow;
+        } else if (!isNoInstanceError(err)) {
+          try {
+            await this.onError(err);
+          } catch {}
+
+          throw err;
+        }
+      };
+
+      if (!this.container.running) {
+        if (tries > 0) {
+          await handleError();
+        }
+
+        this.container.start(startConfig);
+        this.monitor = this.container.monitor();
+      }
 
       await this.renewActivityTimeout();
-
-      this.setupMonitor();
-
       const port = this.container.getTcpPort(33);
       try {
         await port.fetch('http://containerstarthealthcheck');
-        return;
+        return this.monitor;
       } catch (error) {
-        if (isNotListeningError(error)) return;
+        if (isNotListeningError(error) && this.container.running) {
+          return;
+        }
+
+        if (!this.container.running && isNotListeningError(error)) {
+          try {
+            await this.onError(new Error(`container crashed when checking if it was ready`));
+          } catch {}
+
+          throw error;
+        }
 
         console.warn(
           'Error checking if container is ready:',
@@ -376,9 +440,8 @@ export class Container<Env = unknown> extends DurableObject {
   }
 
   private setupMonitor() {
-    this.monitor = this.container
-      .monitor()
-      .then(async () => {
+    this.monitor
+      ?.then(async () => {
         this.ctx.blockConcurrencyWhile(async () => {
           await this.state.setStoppedWithCode(0);
           await this.onStop({ exitCode: 0, reason: 'exit' });
@@ -433,12 +496,13 @@ export class Container<Env = unknown> extends DurableObject {
    * @throws Error if port checks fail after maxTries attempts
    */
   async startAndWaitForPorts(ports?: number | number[], maxTries: number = 10): Promise<void> {
-    if (this.container.running && !this.monitor) {
-      this.setupMonitor();
-    }
-
     const state = await this.state.getState();
     if (state.status === 'healthy' && this.container.running) {
+      if (this.container.running && !this.monitor) {
+        await this.#startContainerIfNotRunning();
+        this.setupMonitor();
+      }
+
       return;
     }
 
@@ -447,7 +511,7 @@ export class Container<Env = unknown> extends DurableObject {
 
     await this.ctx.blockConcurrencyWhile(async () => {
       // Start the container if it's not running
-      await this.startContainer();
+      await this.#startContainerIfNotRunning();
 
       // Determine which ports to check
       let portsToCheck: number[] = [];
@@ -482,11 +546,27 @@ export class Container<Env = unknown> extends DurableObject {
 
             console.warn(`Error checking ${port}: ${errorMessage}`);
 
+            // If not running, it means the container crashed
+            if (!this.container.running) {
+              try {
+                await this.onError(
+                  new Error(
+                    `Container crashed while checking for ports, did you setup the entrypoint correctly?`
+                  )
+                );
+              } catch {}
+
+              throw e;
+            }
+
             // If we're on the last attempt and the port is still not ready, fail
             if (i === maxTries - 1) {
-              throw new Error(
-                `Failed to verify port ${port} is available after ${maxTries} attempts`
-              );
+              try {
+                this.onError(
+                  `Failed to verify port ${port} is available after ${maxTries} attempts, last error: ${errorMessage}`
+                );
+              } catch {}
+              throw e;
             }
 
             // Wait a bit before trying again (300ms like in containers-starter-go)
@@ -495,6 +575,8 @@ export class Container<Env = unknown> extends DurableObject {
         }
       }
     });
+
+    this.setupMonitor();
 
     await this.ctx.blockConcurrencyWhile(async () => {
       // All ports are ready
@@ -650,7 +732,8 @@ export class Container<Env = unknown> extends DurableObject {
     try {
       return await fn();
     } catch (e) {
-      throw this.onError(e);
+      this.onError(e);
+      throw e;
     }
   }
 
