@@ -5,4 +5,5 @@ export type {
   ContainerContext,
   ContainerEventHandler,
   ContainerMessage,
+  ContainerStartConfigOptions,
 } from './types';

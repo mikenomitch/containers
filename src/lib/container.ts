@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import type { ContainerOptions, ContainerStartOptions, Schedule } from '../types';
+import type { ContainerOptions, ContainerStartOptions, ContainerStartConfigOptions, Schedule } from '../types';
 import { DurableObject } from 'cloudflare:workers';
 
 /**
@@ -279,10 +279,11 @@ export class Container<Env = unknown> extends DurableObject {
    * - Initialize a container that doesn't expose ports
    * - Perform custom port availability checks separately
    *
-   * The method applies the container configuration from your instance properties, including:
-   * - Environment variables (this.env)
-   * - Custom entrypoint commands (this.entrypoint)
-   * - Internet access settings (this.enableInternet)
+   * The method applies the container configuration from your instance properties by default, but allows
+   * overriding these values for this specific startup:
+   * - Environment variables (defaults to this.envVars)
+   * - Custom entrypoint commands (defaults to this.entrypoint)
+   * - Internet access settings (defaults to this.enableInternet)
    *
    * It also sets up monitoring to track container lifecycle events and automatically
    * calls the onStop handler when the container terminates.
@@ -297,15 +298,24 @@ export class Container<Env = unknown> extends DurableObject {
    *   // that don't require port access
    * }
    *
+   * @example
+   * // Start with custom configuration
+   * await this.startContainer({
+   *   envVars: { DEBUG: 'true', NODE_ENV: 'development' },
+   *   entrypoint: ['npm', 'run', 'dev'],
+   *   enableInternet: false
+   * });
+   *
+   * @param options - Optional configuration to override instance defaults
    * @returns A promise that resolves when the container start command has been issued
    * @throws Error if no container context is available or if all start attempts fail
    */
-  async startContainer(): Promise<void> {
-    await this.#startContainerIfNotRunning();
+  async startContainer(options?: ContainerStartConfigOptions): Promise<void> {
+    await this.#startContainerIfNotRunning(options);
     this.setupMonitor();
   }
 
-  async #startContainerIfNotRunning(): Promise<Promise<unknown>> {
+  async #startContainerIfNotRunning(options?: ContainerStartConfigOptions): Promise<Promise<unknown>> {
     // Start the container if it's not running
     if (this.container.running) {
       if (!this.monitor) {
@@ -317,13 +327,18 @@ export class Container<Env = unknown> extends DurableObject {
 
     await this.state.setRunning();
     for (let tries = 0; ; tries++) {
+      // Use provided options or fall back to instance properties
+      const envVars = options?.envVars ?? this.envVars;
+      const entrypoint = options?.entrypoint ?? this.entrypoint;
+      const enableInternet = options?.enableInternet ?? this.enableInternet;
+
       // Only include properties that are defined
       const startConfig: ContainerStartOptions = {
-        enableInternet: this.enableInternet,
+        enableInternet,
       };
 
-      if (this.envVars && Object.keys(this.envVars).length > 0) startConfig.env = this.envVars;
-      if (this.entrypoint) startConfig.entrypoint = this.entrypoint;
+      if (envVars && Object.keys(envVars).length > 0) startConfig.env = envVars;
+      if (entrypoint) startConfig.entrypoint = entrypoint;
 
       await this.#cancelSleepTimeout();
 

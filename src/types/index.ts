@@ -66,6 +66,18 @@ export interface ContainerContext {
 export type ContainerEventHandler = () => void | Promise<void>;
 
 /**
+ * Options for starting a container with specific configuration
+ */
+export interface ContainerStartConfigOptions {
+  /** Environment variables to pass to the container */
+  envVars?: Record<string, string>;
+  /** Custom entrypoint to override container default */
+  entrypoint?: string[];
+  /** Whether to enable internet access for the container */
+  enableInternet?: boolean;
+}
+
+/**
  * Represents a scheduled task within a Container
  * @template T Type of the payload data
  */
