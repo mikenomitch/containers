@@ -1,5 +1,10 @@
 import { nanoid } from 'nanoid';
-import type { ContainerOptions, ContainerStartOptions, ContainerStartConfigOptions, Schedule } from '../types';
+import type {
+  ContainerOptions,
+  ContainerStartOptions,
+  ContainerStartConfigOptions,
+  Schedule,
+} from '../types';
 import { DurableObject } from 'cloudflare:workers';
 
 /**
@@ -167,6 +172,8 @@ export class Container<Env = unknown> extends DurableObject {
   // The container won't get a SIGKILL if this threshold is triggered.
   sleepAfter: string | number = '5m';
 
+  #sleepAfterMs = 0;
+
   // Internal tracking for sleep timeout task
   #sleepTimeoutTaskId: string | null = null;
 
@@ -211,6 +218,8 @@ export class Container<Env = unknown> extends DurableObject {
     this.state = new ContainerState(this.ctx.storage);
 
     this.ctx.blockConcurrencyWhile(async () => {
+      this.renewActivityTimeout();
+
       // First thing, schedule the next alarms
       await this.#scheduleNextAlarm();
     });
@@ -243,8 +252,6 @@ export class Container<Env = unknown> extends DurableObject {
         created_at INTEGER DEFAULT (unixepoch())
       )
     `;
-
-    this.recoverActivityTimeout();
 
     // Start the container automatically if needed
     this.ctx.blockConcurrencyWhile(async () => {
@@ -315,7 +322,9 @@ export class Container<Env = unknown> extends DurableObject {
     this.setupMonitor();
   }
 
-  async #startContainerIfNotRunning(options?: ContainerStartConfigOptions): Promise<Promise<unknown>> {
+  async #startContainerIfNotRunning(
+    options?: ContainerStartConfigOptions
+  ): Promise<Promise<unknown>> {
     // Start the container if it's not running
     if (this.container.running) {
       if (!this.monitor) {
@@ -372,7 +381,7 @@ export class Container<Env = unknown> extends DurableObject {
         this.monitor = this.container.monitor();
       }
 
-      await this.renewActivityTimeout();
+      this.renewActivityTimeout();
       const port = this.container.getTcpPort(33);
       try {
         await port.fetch('http://containerstarthealthcheck');
@@ -457,7 +466,7 @@ export class Container<Env = unknown> extends DurableObject {
   private setupMonitor() {
     this.monitor
       ?.then(async () => {
-        this.ctx.blockConcurrencyWhile(async () => {
+        await this.ctx.blockConcurrencyWhile(async () => {
           await this.state.setStoppedWithCode(0);
           await this.onStop({ exitCode: 0, reason: 'exit' });
           await this.state.setStopped();
@@ -487,6 +496,9 @@ export class Container<Env = unknown> extends DurableObject {
           // TODO: Be able to retrigger onError
           await this.onError(error);
         } catch {}
+      })
+      .finally(() => {
+        this.alarmSleepResolve('monitor finally');
       });
   }
 
@@ -675,7 +687,7 @@ export class Container<Env = unknown> extends DurableObject {
 
     try {
       // Renew the activity timeout whenever a request is proxied
-      await this.renewActivityTimeout();
+      this.renewActivityTimeout();
 
       const res = await tcpPort.fetch(containerUrl, request);
       if (res.webSocket) {
@@ -896,14 +908,16 @@ export class Container<Env = unknown> extends DurableObject {
    * Schedule the next alarm based on upcoming tasks
    * @private
    */
-  async #scheduleNextAlarm(): Promise<void> {
+  async #scheduleNextAlarm(ms = 1000): Promise<void> {
     const existingAlarm = await this.ctx.storage.getAlarm();
-    const nextTime = 1000 + Date.now();
+    const nextTime = ms + Date.now();
 
     // if not already set
     if (existingAlarm === null || existingAlarm > nextTime || existingAlarm < Date.now()) {
       await this.ctx.storage.setAlarm(nextTime);
       await this.ctx.storage.sync();
+
+      this.alarmSleepResolve('scheduling next alarm');
     }
   }
 
@@ -1067,11 +1081,18 @@ export class Container<Env = unknown> extends DurableObject {
         type: 'scheduled' | 'delayed';
         time: number;
       }>`
-        SELECT * FROM container_schedules WHERE time <= ${now}
+        SELECT * FROM container_schedules;
       `;
+
+      let maxTime = 0;
 
       // Process each due schedule
       for (const row of result) {
+        if (row.time > now) {
+          maxTime = Math.max(maxTime, row.time * 1000);
+          continue;
+        }
+
         const callback = this[row.callback as keyof this];
 
         if (!callback || typeof callback !== 'function') {
@@ -1103,30 +1124,51 @@ export class Container<Env = unknown> extends DurableObject {
         return;
       }
 
-      // Schedule the next alarm
+      // Schedule the next alarm right away
       await this.#scheduleNextAlarm();
+
+      if (this.isActivityExpired()) {
+        await this.stopDueToInactivity();
+        return;
+      }
+
+      let resolve = (_: unknown) => {};
+      this.alarmSleepPromise = new Promise(res => {
+        this.alarmSleepResolve = val => {
+          // add here any debugging if you need to
+          res(val);
+        };
+
+        resolve = res;
+      });
+
+      // Math.min(3m or maxTime, sleepTimeout)
+      maxTime = maxTime === 0 ? Date.now() + 60 * 3 * 1000 : maxTime;
+      maxTime = Math.min(maxTime, this.#sleepAfterMs);
+      const timeout = Math.max(0, maxTime - Date.now());
+      const timeoutRef = setTimeout(() => {
+        resolve('setTimeout');
+      }, timeout);
+
+      await this.alarmSleepPromise;
+      clearTimeout(timeoutRef);
     });
   }
+
+  alarmSleepPromise: Promise<unknown> | undefined;
+  alarmSleepResolve = (_: unknown) => {};
 
   /**
    * Renew the container's activity timeout
    * Call this method whenever there is activity on the container
    */
-  async renewActivityTimeout(): Promise<void> {
-    if (this.ctx?.container?.running) {
-      await this.#scheduleSleepTimeout();
-    }
+  private renewActivityTimeout() {
+    const timeoutInMs = this.#parseTimeExpression(this.sleepAfter) * 1000;
+    this.#sleepAfterMs = Date.now() + timeoutInMs;
   }
 
-  recoverActivityTimeout(): ScheduleSQL | null {
-    const result = this
-      .sql<ScheduleSQL>`SELECT * FROM container_schedules WHERE callback = 'stopDueToInactivity' LIMIT 1`;
-    if (result.length === 0) {
-      return null;
-    }
-
-    this.#sleepTimeoutTaskId = result[0].id;
-    return result[0];
+  private isActivityExpired(): boolean {
+    return this.#sleepAfterMs <= Date.now();
   }
 
   /**
@@ -1134,17 +1176,12 @@ export class Container<Env = unknown> extends DurableObject {
    */
   async stopDueToInactivity(): Promise<void> {
     if (!this.container.running) {
-      // Clear the task ID since it's been executed
-      this.#sleepTimeoutTaskId = null;
       return;
     }
 
     if (this.websocketCount > 0) {
       return;
     }
-
-    // Clear the task ID since it's been executed
-    this.#sleepTimeoutTaskId = null;
 
     // Stop the container if it's still running
     await this.stopContainer();
