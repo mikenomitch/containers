@@ -13,13 +13,13 @@ A class for interacting with Containers on Cloudflare Workers.
 ## Installation
 
 ```bash
-npm install cf-containers
+npm install @cloudflare/containers
 ```
 
 ## Basic Example
 
 ```typescript
-import { Container, loadBalance } from 'cf-containers';
+import { Container, loadBalance } from '@cloudflare/containers';
 
 export class MyContainer extends Container {
   // Configure default port for the container
@@ -113,7 +113,7 @@ constructor(ctx: any, env: Env, options?: {
 ### HTTP Example with Lifecycle Hooks
 
 ```typescript
-import { Container } from 'cf-containers';
+import { Container } from '@cloudflare/containers';
 
 export class MyContainer extends Container {
   // Configure default port for the container
@@ -178,7 +178,7 @@ By default `fetch` also will do this by calling `containerFetch`.
 You can configure how the container starts by setting the instance properties for environment variables, entrypoint, and network access:
 
 ```typescript
-import { Container } from 'cf-containers';
+import { Container } from '@cloudflare/containers';
 
 export class ConfiguredContainer extends Container {
   // Default port for the container
@@ -210,7 +210,7 @@ export class ConfiguredContainer extends Container {
 For more control over container lifecycle, you can use the `explicitContainerStart` option to disable automatic container startup:
 
 ```typescript
-import { Container } from 'cf-containers';
+import { Container } from '@cloudflare/containers';
 
 export class ManualStartContainer extends Container {
   // Configure default port for the container
@@ -276,7 +276,7 @@ export class ManualStartContainer extends Container {
 You can create a container that doesn't use a default port and instead routes traffic to different ports based on request path or other factors:
 
 ```typescript
-import { Container } from 'cf-containers';
+import { Container } from '@cloudflare/containers';
 
 export class MultiPortContainer extends Container {
   // No defaultPort defined - we'll handle port specification manually
@@ -318,7 +318,7 @@ export class MultiPortContainer extends Container {
 You can use the containerFetch method with standard fetch API syntax:
 
 ```typescript
-import { Container } from 'cf-containers';
+import { Container } from '@cloudflare/containers';
 
 export class FetchStyleContainer extends Container {
   defaultPort = 8080;
@@ -355,7 +355,7 @@ export class FetchStyleContainer extends Container {
 The Container class includes an automatic idle timeout feature that will shut down the container after a period of inactivity. This helps save resources when containers are not in use.
 
 ```typescript
-import { Container } from 'cf-containers';
+import { Container } from '@cloudflare/containers';
 
 export class TimeoutContainer extends Container {
   // Configure default port for the container
@@ -404,7 +404,7 @@ In the future, this will be automatically handled  with smart by Cloudflare Cont
 with autoscaling set to true, but is not yet implemented.
 
 ```typescript
-import { Container, loadBalance } from 'cf-containers';
+import { Container, loadBalance } from '@cloudflare/containers';
 
 export class MyContainer extends Container {
   defaultPort = 8080;
