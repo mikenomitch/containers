@@ -1,8 +1,9 @@
-import { Container, loadBalance, getContainer } from '../../src/index';
+import { Container, loadBalance, getContainer } from '@cloudflare/containers';
 
 export class MyContainer extends Container {
-  defaultPort = 8080;
-  sleepAfter = '5s';
+  defaultPort = 8080; // The default port for the container to listen on
+  sleepAfter = '3m'; // Sleep the container if no requests are made in this timeframe
+
   envVars = {
     MESSAGE: 'I was passed in via the container class!',
   };
@@ -30,28 +31,31 @@ export default {
     // pass a unique container identifier to .get()
 
     if (pathname.startsWith('/container')) {
-      let id = env.MY_CONTAINER.idFromName('container');
-      let container = env.MY_CONTAINER.get(id);
+      const id = env.MY_CONTAINER.idFromName(pathname);
+      const container = env.MY_CONTAINER.get(id);
       return await container.fetch(request);
     }
 
     if (pathname.startsWith('/error')) {
-      let id = env.MY_CONTAINER.idFromName('error-test');
-      let container = env.MY_CONTAINER.get(id);
+      const id = env.MY_CONTAINER.idFromName('error-test');
+      const container = env.MY_CONTAINER.get(id);
       return await container.fetch(request);
     }
 
     if (pathname.startsWith('/lb')) {
-      let container = await loadBalance(env.MY_CONTAINER, 3);
+      const container = await loadBalance(env.MY_CONTAINER, 3);
       return await container.fetch(request);
     }
 
     if (pathname.startsWith('/singleton')) {
+      // gets the default instance
+      // useful for singleton containers, and eventually will
+      // be used when autoscaling is implemented
       return await getContainer(env.MY_CONTAINER).fetch(request);
     }
 
     return new Response(
-      'call /container to start a container with a 10s timeout.\nCall /error to start a container that errors\nCall /lb to test load balancing'
+      'Call /container to start a container with a 10s timeout.\nCall /error to start a container that errors\nCall /lb to test load balancing'
     );
   },
 };
